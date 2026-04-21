@@ -11,6 +11,15 @@ import type {
 const PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions";
 const MODEL = "sonar-pro";
 
+const SYSTEM_PROMPT = `Jesteś analitykiem wywiadu sprzedażowego dla polskich firm B2B. Wykonujesz konkretne wyszukiwania w sieci i zwracasz TYLKO potwierdzone fakty z cytatami źródeł.
+
+ZASADY:
+- Odpowiadaj WYŁĄCZNIE w formacie JSON zgodnym ze schematem
+- status "confirmed" = znalazłeś bezpośredni dowód z URL; "inferred" = logiczny wniosek; "missing" = nie znaleziono mimo szukania
+- NIE WYMYŚLAJ danych, URL-i ani nazwisk — użyj status "missing" jeśli brak
+- Gdy prompt zawiera konkretne zapytania do wyszukania — wykonaj JE WSZYSTKIE przed odpowiedzią
+- Skup się na danych z 2022–2025 chyba że pytanie dotyczy historii firmy`;
+
 async function callSonar<T>(prompt: string, schema: object): Promise<T> {
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) throw new Error("PERPLEXITY_API_KEY not set");
@@ -24,11 +33,7 @@ async function callSonar<T>(prompt: string, schema: object): Promise<T> {
     body: JSON.stringify({
       model: MODEL,
       messages: [
-        {
-          role: "system",
-          content:
-            "Jesteś asystentem analizy leadów sprzedażowych dla polskich firm. Zawsze odpowiadaj w formacie JSON zgodnym ze schematem. Nie wymyślaj URL-i — używaj tylko tych, które znalazłeś w wyszukiwaniu. Dla każdego pola podaj status: confirmed (znaleziono bezpośrednio), inferred (wywnioskowano z kontekstu), missing (brak danych), conflicting (sprzeczne dane).",
-        },
+        { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: prompt },
       ],
       response_format: { type: "json_schema", json_schema: { schema } },
@@ -59,11 +64,32 @@ function field<T = string>(description: string, type = "string", extra: object =
 }
 
 export async function fetchCompanyProfile(input: LeadInput): Promise<CompanyProfile> {
-  const prompt = `Zbierz dane firmograficzne dla firmy: "${input.companyName}", domena: ${input.domain}${input.nip ? `, NIP: ${input.nip}` : ""}${input.krs ? `, KRS: ${input.krs}` : ""}.
+  const id = `"${input.companyName}"`;
+  const nipLine = input.nip ? ` NIP: ${input.nip}` : "";
+  const krsLine = input.krs ? ` KRS: ${input.krs}` : "";
 
-Zbierz: branżę i specjalizację, obszar działania (lokalny/krajowy/międzynarodowy), rok założenia, wielkość zespołu, strukturę firmy (niezależna/korporacja/franczyza/giełdowa), model biznesowy (SaaS/jednorazowa/prowizje/produkcja), adres biura i telefon, datę rejestracji domeny i właściciela, linki do social media (LinkedIn/Facebook/Instagram/YouTube/Twitter/TikTok), link do wizytówki Google Maps.
+  const prompt = `Zbierz dane firmograficzne dla firmy ${id}, strona: ${input.domain}${nipLine}${krsLine}.
 
-Na końcu napisz krótkie podsumowanie 4-6 zdań: kim jest ta firma, na jakim etapie jest i jak zarabia.`;
+Wykonaj kolejno następujące wyszukiwania:
+1. ${id} historia założenie siedziba właściciel${nipLine} — rok założenia, forma prawna, adres rejestrowy
+2. site:${input.domain} "o nas" OR "o firmie" OR "kim jesteśmy" OR "historia" — opis firmy ze strony
+3. ${id} "liczba pracowników" OR "zatrudniamy" OR "nasz zespół" — wielkość zespołu
+4. ${id} LinkedIn Facebook Instagram YouTube TikTok — linki do profili społecznościowych
+5. ${id} "Google Maps" OR "wizytówka" — adres i dane kontaktowe
+
+Na podstawie wyników wypełnij:
+- branżę i specjalizację (co konkretnie robi ta firma)
+- obszar działania: local (miasto/region), national (cała Polska), international (eksport/zagranica)
+- rok założenia
+- liczbę pracowników lub przedział (np. "10–50")
+- strukturę: independent / corporation / franchise / public
+- model biznesowy: SaaS / one-time / commission / production / services
+- adres siedziby i numer telefonu
+- datę rejestracji domeny i właściciela (whois)
+- listę URL-i profili social media (tylko znalezione)
+- link do Google Maps (tylko jeśli znaleziony)
+
+Napisz podsumowanie 4–6 zdań: czym się firma zajmuje, na jakim etapie jest i jak zarabia.`;
 
   const schema = {
     type: "object",
@@ -119,11 +145,19 @@ Na końcu napisz krótkie podsumowanie 4-6 zdań: kim jest ta firma, na jakim et
 }
 
 export async function fetchGrowthSignals(input: LeadInput): Promise<GrowthSection> {
-  const prompt = `Znajdź sygnały wzrostu i bieżące wydarzenia dla firmy "${input.companyName}" (${input.domain}).
+  const id = `"${input.companyName}"`;
 
-Szukaj: nowych oddziałów, dofinansowania, fuzji/przejęć, nowych produktów/linii biznesowych, ekspansji zagranicznej, aktywności PR/eventowej (targi, własne eventy, wystąpienia), współprac z influencerami lub ambasadorami marki, nowych katalogów produktowych, wzmianek medialnych, aktualnie otwartych wakatów (na jakie stanowiska rekrutują).
+  const prompt = `Znajdź sygnały wzrostu firmy ${id} (${input.domain}) — skup się na wydarzeniach z lat 2023–2025.
 
-Każdy sygnał powinien mieć: typ, opis, datę (jeśli znana) i URL źródła.`;
+Wykonaj kolejno następujące wyszukiwania:
+1. ${id} 2024 2025 ekspansja nowy oddział inwestycja dofinansowanie przejęcie — inwestycje i ekspansja
+2. ${id} 2024 2025 nowy produkt nowa usługa linia partnerstwo współpraca — nowe produkty i partnerstwa
+3. ${id} targi konferencja event wystąpienie nagroda wyróżnienie — aktywność PR i eventowa
+4. ${id} site:pracuj.pl OR site:linkedin.com/jobs OR site:nofluffjobs.com — otwarte rekrutacje (jakie stanowiska)
+5. ${id} 2024 2025 wywiad artykuł prasa media wzmianki — artykuły i wzmianki medialne
+6. ${id} influencer ambasador marka kampania reklamowa — współprace marketingowe
+
+Dla każdego sygnału podaj: typ, opis, datę (jeśli znana) i URL źródła. Ocen relevance (high/medium/low) dla potencjalnego klienta B2B.`;
 
   const schema = {
     type: "object",
@@ -167,15 +201,40 @@ export async function fetchRiskSignals(
   input: LeadInput,
   krsContext?: string
 ): Promise<RiskSection> {
+  const id = `"${input.companyName}"`;
+  const nipStr = input.nip ? ` NIP ${input.nip}` : "";
   const krsBlock = krsContext
-    ? `\nZweryfikowane dane z KRS i eKRS (użyj jako podstawy dla danych finansowych):\n${krsContext}\n`
+    ? `\nZWERYFIKOWANE DANE Z KRS (użyj jako podstawy dla danych finansowych, uzupełnij tylko brakujące lata):\n${krsContext}\n`
     : "";
+  const finSource = krsContext
+    ? "— dane z KRS powyżej mają priorytet; uzupełnij brakujące lata z internetu"
+    : "— szukaj na: ekrs.ms.gov.pl, rejestr.io, infoveriti.pl, biznes.gov.pl";
 
-  const prompt = `Zbierz sygnały ryzyka dla firmy "${input.companyName}" (${input.domain}${input.nip ? `, NIP: ${input.nip}` : ""}).
+  const prompt = `Zbierz sygnały ryzyka i dane finansowe firmy ${id} (${input.domain}${nipStr}).
 ${krsBlock}
-Szukaj: zmian zarządu lub rady nadzorczej, zmian na stanowiskach dyrektora sprzedaży/marketingu, sprzedaży lub wykupu akcji, zmian struktury własnościowej, danych finansowych z ostatnich 2-3 lat (przychody, zysk/strata, zadłużenie${krsContext ? " — dane z KRS wyżej mają priorytet" : " — sprawdź ekrs.ms.gov.pl lub dostępne sprawozdania"}), opinii w Google Maps, Clutch i Gowork (ocena i główne skargi), sygnałów operacyjnych (redukcje etatów, rotacja pracowników, problemy PR).
+SEKCJA 1 — DANE FINANSOWE (lata 2021–2024) ${finSource}:
+Wykonaj wyszukiwania:
+- ${id}${nipStr} sprawozdanie finansowe przychody zysk strata 2022 2023 2024
+- ${id} wyniki finansowe roczne raport 2023 2024
+- ${id} przychody ze sprzedaży zadłużenie zobowiązania
+Zbierz za każdy dostępny rok: przychody ogółem, zysk/strata netto, zobowiązania ogółem. Oceń trend (growing/stable/declining).
 
-Każdy sygnał ryzyka powinien mieć poziom: low/medium/high.`;
+SEKCJA 2 — ZMIANY ZARZĄDU I WŁASNOŚCI:
+- ${id} zarząd prezes dyrektor zmiana odwołanie powołanie 2022 2023 2024 2025
+- ${id} właściciel udziały sprzedaż przejęcie zmiana 2022 2023 2024 2025
+- ${id} dyrektor sprzedaży dyrektor marketingu zmiana odejście 2023 2024 2025
+
+SEKCJA 3 — OPINIE PRACOWNIKÓW I KLIENTÓW:
+- ${id} site:gowork.pl — pobierz aktualną ocenę (gwiazdki) i powtarzające się skargi pracowników
+- ${id} site:clutch.co — ocena i opinie klientów B2B
+- ${id} site:google.com/maps OR "opinie Google" — ogólna ocena i skargi
+
+SEKCJA 4 — SYGNAŁY OPERACYJNE I PR:
+- ${id} zwolnienia restrukturyzacja redukcja etatów 2023 2024 2025
+- ${id} kontrowersje problemy skargi kary UOKiK pozew 2022 2023 2024 2025
+- ${id} rotacja pracowników opinie zatrudnienie
+
+Każdy sygnał ryzyka oznacz poziomem: low / medium / high.`;
 
   const schema = {
     type: "object",
@@ -239,19 +298,36 @@ export async function fetchDecisionStructure(
   input: LeadInput,
   krsManagement?: string
 ): Promise<DecisionStructure> {
+  const id = `"${input.companyName}"`;
   const krsBlock = krsManagement
-    ? `\nZweryfikowany zarząd z KRS:\n${krsManagement}\n`
+    ? `\nZWERYFIKOWANY ZARZĄD Z KRS (traktuj jako potwierdzony):\n${krsManagement}\n`
+    : "";
+  const contactLine = input.contactName
+    ? `\nOsoba kontaktowa: ${input.contactName}${input.contactTitle ? `, stanowisko: ${input.contactTitle}` : ""}. Określ jej rolę w hierarchii (owner/director/manager/specialist).`
     : "";
 
-  const prompt = `Przeanalizuj strukturę decyzyjną i profil LinkedIn firmy "${input.companyName}" (${input.domain}).${input.contactName ? ` Osoba kontaktowa: ${input.contactName}${input.contactTitle ? `, stanowisko: ${input.contactTitle}` : ""}.` : ""}
-${krsBlock}
-KROK 1 — LINKEDIN:
-Wyszukaj profil firmowy na LinkedIn używając zapytania: site:linkedin.com/company "${input.companyName}". Znajdź oficjalny URL strony firmowej LinkedIn. Następnie wyszukaj pracowników: site:linkedin.com/in "${input.companyName}" (CEO OR CMO OR "dyrektor sprzedaży" OR "dyrektor marketingu" OR "Head of Sales" OR "Head of Marketing" OR właściciel). Dla każdej znalezionej osoby podaj: imię, nazwisko, stanowisko, URL profilu LinkedIn w formacie "Imię Nazwisko - Stanowisko - linkedin.com/in/slug".
+  const prompt = `Przeanalizuj strukturę decyzyjną i znajdź kluczowych pracowników firmy ${id} (${input.domain}).
+${krsBlock}${contactLine}
 
-KROK 2 — STRUKTURA DECYZYJNA:
-Określ: gdzie w hierarchii firmy siedzi nasz rozmówca, czy firma ma wewnętrzny dział marketingu (i jak liczny), czy ma dział sprzedaży, czy stosuje model przedstawicieli handlowych i struktur regionalnych, jak złożony jest prawdopodobny komitet zakupowy (simple/medium/complex), czy nasz rozmówca to właściciel/dyrektor/manager/specjalista.
+KROK 1 — PROFIL FIRMY NA LINKEDIN:
+Wyszukaj: site:linkedin.com/company ${id}
+Znajdź oficjalny profil i liczbę pracowników widoczną na LinkedIn.
 
-Hipotezy na podstawie poszlak oznacz jako "inferred", nie "confirmed". URL-e LinkedIn tylko jeśli faktycznie je znalazłeś.`;
+KROK 2 — ZNAJDŹ KLUCZOWE OSOBY (wykonaj WSZYSTKIE 4 wyszukiwania):
+a) site:linkedin.com/in ${id} (CEO OR prezes OR właściciel OR "Managing Director" OR "founder")
+b) site:linkedin.com/in ${id} ("dyrektor marketingu" OR CMO OR "Head of Marketing" OR "marketing director" OR "marketing manager")
+c) site:linkedin.com/in ${id} ("dyrektor sprzedaży" OR "Head of Sales" OR "Sales Director" OR "VP Sales" OR "key account")
+d) ${id} LinkedIn pracownicy zarząd — dodatkowe profile nie znalezione wyżej
+
+Dla każdej znalezionej osoby podaj dokładnie w formacie: "Imię Nazwisko — Stanowisko — linkedin.com/in/slug"
+TYLKO rzeczywiście znalezione profile z realnym URL. Jeśli brak URL, format: "Imię Nazwisko — Stanowisko".
+
+KROK 3 — OCEŃ STRUKTURĘ ORGANIZACYJNĄ:
+Na podstawie liczby pracowników, profilu LinkedIn i dostępnych danych określ:
+- czy firma ma wewnętrzny dział marketingu (szacowana liczba osób)
+- czy ma dział sprzedaży / model przedstawicieli handlowych
+- złożoność komitetu zakupowego: simple (1-2 decydentów) / medium / complex (>5 osób)
+- typ rozmówcy: owner / director / manager / specialist`;
 
   const boolField = () => ({
     type: "object",
@@ -300,7 +376,7 @@ Hipotezy na podstawie poszlak oznacz jako "inferred", nie "confirmed". URL-e Lin
       decision_maker_type: enumField(["owner", "director", "manager", "specialist"]),
       linkedin_company_url: field("Oficjalny URL strony firmowej na LinkedIn (linkedin.com/company/...)"),
       key_decision_makers: arrField(
-        'Lista kluczowych osób w formacie "Imię Nazwisko - Stanowisko - linkedin.com/in/slug" lub "Imię Nazwisko - Stanowisko" jeśli brak URL'
+        'Lista kluczowych osób w formacie "Imię Nazwisko — Stanowisko — linkedin.com/in/slug" lub "Imię Nazwisko — Stanowisko" jeśli brak URL'
       ),
       summary: { type: "string" },
     },
@@ -315,11 +391,32 @@ Hipotezy na podstawie poszlak oznacz jako "inferred", nie "confirmed". URL-e Lin
 }
 
 export async function fetchBuyingReadiness(input: LeadInput): Promise<BuyingReadiness> {
-  const prompt = `Oceń gotowość zakupową firmy "${input.companyName}" (${input.domain}) na usługi marketingowe.
+  const id = `"${input.companyName}"`;
 
-Określ: czy firma prawdopodobnie ma budżet marketingowy (budgeted/ad_hoc/no_budget/unknown), pilność zakupu (immediate/short_term/long_term/unknown), świadomość problemu (high/medium/low), dojrzałość marketingową (high/medium/low — na podstawie jakości strony, aktywności social media, obecności online, reklam), czy korzystała wcześniej z podobnych usług zewnętrznych (agencja, SaaS marketingowy).
+  const prompt = `Oceń gotowość zakupową firmy ${id} (${input.domain}) na usługi marketingowe.
 
-Szukaj sygnałów: ogłoszenia o pracę na stanowiska marketingowe, aktywna reklama w Google/Meta, aktywny blog lub content marketing, profesjonalna strona www.`;
+KROK 1 — OBECNOŚĆ REKLAMOWA:
+- ${id} reklama Google Ads kampania PPC SEA — czy prowadzi płatne reklamy
+- ${id} Facebook reklama Meta kampania Instagram — reklamy w social media
+- ${id} agencja marketingowa współpraca obsługuje — czy korzysta z zewnętrznej agencji
+- Sprawdź bibliotekę reklam Meta: wyszukaj ${id} w facebook.com/ads/library
+
+KROK 2 — CONTENT I WIDOCZNOŚĆ ONLINE:
+- site:${input.domain} blog OR artykuł OR poradnik — aktywność contentowa
+- ${id} blog wpis artykuł 2024 2025 — content marketing w ostatnim roku
+- Oceń stronę ${input.domain}: wygląd, aktualność, czy jest nowoczesna i profesjonalna
+
+KROK 3 — SYGNAŁY ZAKUPOWE:
+- ${id} zatrudni "specjalista ds. marketingu" OR "marketing manager" OR "SEM specialist" OR "content manager" site:pracuj.pl OR site:linkedin.com/jobs — czy szuka marketerów (= brak agencji lub plany wzrostu)
+- ${id} rebrand nowa strona rebranding 2024 2025 — plany inwestycji w markę
+- ${id} "szukamy agencji" OR "przetarg marketingowy" OR "zapytanie ofertowe marketing"
+
+Na podstawie WSZYSTKICH zebranych sygnałów oceń:
+- budget_signal: budgeted (wyraźne sygnały budżetu) / ad_hoc / no_budget / unknown
+- urgency: immediate / short_term / long_term / unknown
+- problem_awareness: high / medium / low — czy firma rozumie potrzebę profesjonalnego marketingu
+- marketing_maturity: high (aktywne kampanie, blog, dobra strona) / medium / low (brak działań)
+- used_similar_solution_before: czy korzystała z agencji lub SaaS marketingowego`;
 
   const schema = {
     type: "object",
