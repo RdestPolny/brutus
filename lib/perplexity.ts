@@ -163,10 +163,17 @@ Każdy sygnał powinien mieć: typ, opis, datę (jeśli znana) i URL źródła.`
   return callSonar<GrowthSection>(prompt, schema);
 }
 
-export async function fetchRiskSignals(input: LeadInput): Promise<RiskSection> {
-  const prompt = `Zbierz sygnały ryzyka dla firmy "${input.companyName}" (${input.domain}${input.nip ? `, NIP: ${input.nip}` : ""}).
+export async function fetchRiskSignals(
+  input: LeadInput,
+  krsContext?: string
+): Promise<RiskSection> {
+  const krsBlock = krsContext
+    ? `\nZweryfikowane dane z KRS i eKRS (użyj jako podstawy dla danych finansowych):\n${krsContext}\n`
+    : "";
 
-Szukaj: zmian zarządu lub rady nadzorczej, zmian na stanowiskach dyrektora sprzedaży/marketingu, sprzedaży lub wykupu akcji, zmian struktury własnościowej, danych finansowych z ostatnich 2-3 lat (przychody, zysk/strata, zadłużenie — sprawdź ekrs.ms.gov.pl lub dostępne sprawozdania), opinii w Google Maps, Clutch i Gowork (ocena i główne skargi), sygnałów operacyjnych (redukcje etatów, rotacja pracowników, problemy PR).
+  const prompt = `Zbierz sygnały ryzyka dla firmy "${input.companyName}" (${input.domain}${input.nip ? `, NIP: ${input.nip}` : ""}).
+${krsBlock}
+Szukaj: zmian zarządu lub rady nadzorczej, zmian na stanowiskach dyrektora sprzedaży/marketingu, sprzedaży lub wykupu akcji, zmian struktury własnościowej, danych finansowych z ostatnich 2-3 lat (przychody, zysk/strata, zadłużenie${krsContext ? " — dane z KRS wyżej mają priorytet" : " — sprawdź ekrs.ms.gov.pl lub dostępne sprawozdania"}), opinii w Google Maps, Clutch i Gowork (ocena i główne skargi), sygnałów operacyjnych (redukcje etatów, rotacja pracowników, problemy PR).
 
 Każdy sygnał ryzyka powinien mieć poziom: low/medium/high.`;
 
@@ -229,58 +236,78 @@ Każdy sygnał ryzyka powinien mieć poziom: low/medium/high.`;
 }
 
 export async function fetchDecisionStructure(
-  input: LeadInput
+  input: LeadInput,
+  krsManagement?: string
 ): Promise<DecisionStructure> {
-  const prompt = `Przeanalizuj strukturę decyzyjną firmy "${input.companyName}" (${input.domain}).${input.contactName ? ` Osoba kontaktowa: ${input.contactName}${input.contactTitle ? `, stanowisko: ${input.contactTitle}` : ""}.` : ""}
+  const krsBlock = krsManagement
+    ? `\nZweryfikowany zarząd z KRS:\n${krsManagement}\n`
+    : "";
 
+  const prompt = `Przeanalizuj strukturę decyzyjną i profil LinkedIn firmy "${input.companyName}" (${input.domain}).${input.contactName ? ` Osoba kontaktowa: ${input.contactName}${input.contactTitle ? `, stanowisko: ${input.contactTitle}` : ""}.` : ""}
+${krsBlock}
+KROK 1 — LINKEDIN:
+Wyszukaj profil firmowy na LinkedIn używając zapytania: site:linkedin.com/company "${input.companyName}". Znajdź oficjalny URL strony firmowej LinkedIn. Następnie wyszukaj pracowników: site:linkedin.com/in "${input.companyName}" (CEO OR CMO OR "dyrektor sprzedaży" OR "dyrektor marketingu" OR "Head of Sales" OR "Head of Marketing" OR właściciel). Dla każdej znalezionej osoby podaj: imię, nazwisko, stanowisko, URL profilu LinkedIn w formacie "Imię Nazwisko - Stanowisko - linkedin.com/in/slug".
+
+KROK 2 — STRUKTURA DECYZYJNA:
 Określ: gdzie w hierarchii firmy siedzi nasz rozmówca, czy firma ma wewnętrzny dział marketingu (i jak liczny), czy ma dział sprzedaży, czy stosuje model przedstawicieli handlowych i struktur regionalnych, jak złożony jest prawdopodobny komitet zakupowy (simple/medium/complex), czy nasz rozmówca to właściciel/dyrektor/manager/specjalista.
 
-Hipotezy na podstawie poszlak oznacz jako "inferred", nie "confirmed".`;
+Hipotezy na podstawie poszlak oznacz jako "inferred", nie "confirmed". URL-e LinkedIn tylko jeśli faktycznie je znalazłeś.`;
+
+  const boolField = () => ({
+    type: "object",
+    properties: {
+      value: { type: "boolean" },
+      confidence: { type: "number" },
+      status: { type: "string", enum: ["confirmed", "inferred", "missing", "conflicting"] },
+      source_urls: { type: "array", items: { type: "string" } },
+      evidence_excerpt: { type: "string" },
+    },
+    required: ["value", "confidence", "status", "source_urls", "evidence_excerpt"],
+  });
+
+  const enumField = (values: string[]) => ({
+    type: "object",
+    properties: {
+      value: { type: "string", enum: values },
+      confidence: { type: "number" },
+      status: { type: "string", enum: ["confirmed", "inferred", "missing", "conflicting"] },
+      source_urls: { type: "array", items: { type: "string" } },
+      evidence_excerpt: { type: "string" },
+    },
+    required: ["value", "confidence", "status", "source_urls", "evidence_excerpt"],
+  });
+
+  const arrField = (description: string) => ({
+    type: "object",
+    properties: {
+      value: { type: "array", items: { type: "string" }, description },
+      confidence: { type: "number" },
+      status: { type: "string", enum: ["confirmed", "inferred", "missing", "conflicting"] },
+      source_urls: { type: "array", items: { type: "string" } },
+      evidence_excerpt: { type: "string" },
+    },
+    required: ["value", "confidence", "status", "source_urls", "evidence_excerpt"],
+  });
 
   const schema = {
     type: "object",
     properties: {
       contact_role_in_hierarchy: field("Rola rozmówcy w hierarchii firmy"),
       marketing_team_size: field("Szacowany rozmiar działu marketingu"),
-      has_sales_team: {
-        type: "object",
-        properties: {
-          value: { type: "boolean" },
-          confidence: { type: "number" },
-          status: { type: "string", enum: ["confirmed", "inferred", "missing", "conflicting"] },
-          source_urls: { type: "array", items: { type: "string" } },
-          evidence_excerpt: { type: "string" },
-        },
-        required: ["value", "confidence", "status", "source_urls", "evidence_excerpt"],
-      },
+      has_sales_team: boolField(),
       sales_model: field("Model sprzedaży (przedstawiciele/e-commerce/direct itp)"),
-      buying_committee_complexity: {
-        type: "object",
-        properties: {
-          value: { type: "string", enum: ["simple", "medium", "complex"] },
-          confidence: { type: "number" },
-          status: { type: "string", enum: ["confirmed", "inferred", "missing", "conflicting"] },
-          source_urls: { type: "array", items: { type: "string" } },
-          evidence_excerpt: { type: "string" },
-        },
-        required: ["value", "confidence", "status", "source_urls", "evidence_excerpt"],
-      },
-      decision_maker_type: {
-        type: "object",
-        properties: {
-          value: { type: "string", enum: ["owner", "director", "manager", "specialist"] },
-          confidence: { type: "number" },
-          status: { type: "string", enum: ["confirmed", "inferred", "missing", "conflicting"] },
-          source_urls: { type: "array", items: { type: "string" } },
-          evidence_excerpt: { type: "string" },
-        },
-        required: ["value", "confidence", "status", "source_urls", "evidence_excerpt"],
-      },
+      buying_committee_complexity: enumField(["simple", "medium", "complex"]),
+      decision_maker_type: enumField(["owner", "director", "manager", "specialist"]),
+      linkedin_company_url: field("Oficjalny URL strony firmowej na LinkedIn (linkedin.com/company/...)"),
+      key_decision_makers: arrField(
+        'Lista kluczowych osób w formacie "Imię Nazwisko - Stanowisko - linkedin.com/in/slug" lub "Imię Nazwisko - Stanowisko" jeśli brak URL'
+      ),
       summary: { type: "string" },
     },
     required: [
       "contact_role_in_hierarchy", "marketing_team_size", "has_sales_team",
-      "sales_model", "buying_committee_complexity", "decision_maker_type", "summary",
+      "sales_model", "buying_committee_complexity", "decision_maker_type",
+      "linkedin_company_url", "key_decision_makers", "summary",
     ],
   };
 

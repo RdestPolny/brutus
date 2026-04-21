@@ -7,6 +7,7 @@ import {
   fetchBuyingReadiness,
   fetchRecommendedQuestions,
 } from "@/lib/perplexity";
+import { fetchKrsEnrichedData, formatKrsContext } from "@/lib/krs";
 import { computeScore } from "@/lib/scoring";
 import type { LeadBrief, LeadInput } from "@/lib/types";
 
@@ -22,12 +23,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const krsData = input.krs ? await fetchKrsEnrichedData(input.krs) : null;
+  const krsContext = krsData ? formatKrsContext(krsData) : undefined;
+
+  const krsManagement = krsData?.basic?.management?.length
+    ? krsData.basic.management.map((p) => `${p.name} — ${p.role}`).join("\n")
+    : undefined;
+
   const [company_profile, growth, risks, decision_structure, buying_readiness] =
     await Promise.all([
       fetchCompanyProfile(input),
       fetchGrowthSignals(input),
-      fetchRiskSignals(input),
-      fetchDecisionStructure(input),
+      fetchRiskSignals(input, krsContext),
+      fetchDecisionStructure(input, krsManagement),
       fetchBuyingReadiness(input),
     ]);
 

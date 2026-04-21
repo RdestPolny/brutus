@@ -83,6 +83,8 @@ export interface DecisionStructure {
   sales_model: DataField;
   buying_committee_complexity: DataField<"simple" | "medium" | "complex">;
   decision_maker_type: DataField<"owner" | "director" | "manager" | "specialist">;
+  linkedin_company_url: DataField;
+  key_decision_makers: DataField<string[]>;
   summary: string;
 }
 
