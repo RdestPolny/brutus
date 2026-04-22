@@ -31,8 +31,13 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || `HTTP ${res.status}`);
+        const text = await res.text();
+        let message = `HTTP ${res.status}`;
+        try {
+          const err = JSON.parse(text);
+          message = err.error || message;
+        } catch { /* HTML error page — use status code */ }
+        throw new Error(message);
       }
 
       const data: LeadBrief = await res.json();

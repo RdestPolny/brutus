@@ -19,7 +19,13 @@ import type { LeadBrief, LeadInput } from "@/lib/types";
 export const maxDuration = 120;
 
 export async function POST(req: NextRequest) {
-  const input: LeadInput = await req.json();
+  let input: LeadInput;
+
+  try {
+    input = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 });
+  }
 
   if (!input.companyName || !input.domain) {
     return NextResponse.json(
@@ -28,51 +34,57 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Parallel: KRS fetch + 3 bulk Perplexity searches
-  const [krsData, companyRaw, growthRisksRaw, marketingRaw] = await Promise.all([
-    input.krs ? fetchKrsEnrichedData(input.krs) : Promise.resolve(null),
-    searchCompanyPeopleAndSocial(input),
-    searchGrowthAndRisks(input),
-    searchMarketingReadiness(input),
-  ]);
-
-  const krsContext = krsData ? formatKrsContext(krsData) : undefined;
-  const krsManagement = krsData?.basic?.management?.length
-    ? krsData.basic.management.map((p) => `${p.name} — ${p.role}`).join("\n")
-    : undefined;
-
-  // Pass raw Perplexity text to Gemini for structuring — parallel
-  const [company_profile, growth, risks, decision_structure, buying_readiness] =
-    await Promise.all([
-      structureCompanyProfile(companyRaw, input),
-      structureGrowthSection(growthRisksRaw),
-      structureRiskSection(growthRisksRaw, krsContext),
-      structureDecisionStructure(companyRaw, input, krsManagement),
-      structureBuyingReadiness(marketingRaw, input),
+  try {
+    // Parallel: KRS fetch + 3 bulk Perplexity searches
+    const [krsData, companyRaw, growthRisksRaw, marketingRaw] = await Promise.all([
+      input.krs ? fetchKrsEnrichedData(input.krs) : Promise.resolve(null),
+      searchCompanyPeopleAndSocial(input),
+      searchGrowthAndRisks(input),
+      searchMarketingReadiness(input),
     ]);
 
-  const context = [
-    `Profil: ${company_profile.summary}`,
-    `Sygnały wzrostu: ${growth.summary}`,
-    `Ryzyka: ${risks.summary}`,
-    `Struktura decyzyjna: ${decision_structure.summary}`,
-    `Gotowość zakupowa: ${buying_readiness.summary}`,
-  ].join("\n\n");
+    const krsContext = krsData ? formatKrsContext(krsData) : undefined;
+    const krsManagement = krsData?.basic?.management?.length
+      ? krsData.basic.management.map((p) => `${p.name} — ${p.role}`).join("\n")
+      : undefined;
 
-  const recommended_questions = await generateRecommendedQuestions(input, context);
-  const score = computeScore(company_profile, growth, risks, decision_structure, buying_readiness);
+    // Pass raw Perplexity text to Gemini for structuring — parallel
+    const [company_profile, growth, risks, decision_structure, buying_readiness] =
+      await Promise.all([
+        structureCompanyProfile(companyRaw, input),
+        structureGrowthSection(growthRisksRaw),
+        structureRiskSection(growthRisksRaw, krsContext),
+        structureDecisionStructure(companyRaw, input, krsManagement),
+        structureBuyingReadiness(marketingRaw, input),
+      ]);
 
-  const brief: LeadBrief = {
-    input,
-    generated_at: new Date().toISOString(),
-    company_profile,
-    growth,
-    risks,
-    decision_structure,
-    buying_readiness,
-    recommended_questions,
-    score,
-  };
+    const context = [
+      `Profil: ${company_profile.summary}`,
+      `Sygnały wzrostu: ${growth.summary}`,
+      `Ryzyka: ${risks.summary}`,
+      `Struktura decyzyjna: ${decision_structure.summary}`,
+      `Gotowość zakupowa: ${buying_readiness.summary}`,
+    ].join("\n\n");
 
-  return NextResponse.json(brief);
+    const recommended_questions = await generateRecommendedQuestions(input, context);
+    const score = computeScore(company_profile, growth, risks, decision_structure, buying_readiness);
+
+    const brief: LeadBrief = {
+      input,
+      generated_at: new Date().toISOString(),
+      company_profile,
+      growth,
+      risks,
+      decision_structure,
+      buying_readiness,
+      recommended_questions,
+      score,
+    };
+
+    return NextResponse.json(brief);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Internal server error";
+    console.error("[brief] error:", err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

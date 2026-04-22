@@ -31,7 +31,9 @@ async function callGemini(systemPrompt: string, userPrompt: string): Promise<str
   }
 
   const data = await res.json();
-  return data.candidates[0].content.parts[0].text as string;
+  const raw = data.candidates[0].content.parts[0].text as string;
+  // Strip markdown code fences Gemini sometimes wraps around JSON
+  return raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
 }
 
 const STRUCTURE_SYSTEM = `Jesteś ekspertem w analizie danych sprzedażowych B2B dla polskiego rynku. Otrzymujesz surowe wyniki wyszukiwania i strukturyzujesz je w precyzyjny JSON raport.
