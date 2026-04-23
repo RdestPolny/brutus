@@ -15,6 +15,7 @@ export default function Home() {
   });
   const [loading, setLoading] = useState(false);
   const [brief, setBrief] = useState<LeadBrief | null>(null);
+  const [debug, setDebug] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -40,8 +41,10 @@ export default function Home() {
         throw new Error(message);
       }
 
-      const data: LeadBrief = await res.json();
-      setBrief(data);
+      const data = await res.json();
+      const { _debug, ...briefData } = data;
+      setBrief(briefData as LeadBrief);
+      setDebug(_debug ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Nieznany błąd");
     } finally {
@@ -154,7 +157,7 @@ export default function Home() {
         )}
 
         {/* Brief */}
-        {brief && <BriefView brief={brief} />}
+        {brief && <BriefView brief={brief} debug={debug} />}
       </div>
     </main>
   );

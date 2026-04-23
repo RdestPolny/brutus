@@ -214,7 +214,53 @@ function ScoreCard({ score }: { score: LeadScore }) {
   );
 }
 
-export function BriefView({ brief }: { brief: LeadBrief }) {
+const DEBUG_STEPS = [
+  { key: "preprocess", label: "Step 0 — Preprocessing (Gemini Flash)" },
+  { key: "f1_website", label: "F1 — Firecrawl: strona firmowa" },
+  { key: "krs", label: "F2 — KRS (sformatowany kontekst)" },
+  { key: "s1", label: "S1 — Perplexity: firmograficzne (sonar)" },
+  { key: "s2", label: "S2 — Perplexity: struktura korporacyjna (sonar-pro)" },
+  { key: "s3", label: "S3 — Perplexity: bieżące wydarzenia (sonar-pro)" },
+  { key: "s4", label: "S4 — Perplexity: digital presence (sonar)" },
+  { key: "s5", label: "S5 — Perplexity: kontekst branżowy (sonar-pro)" },
+  { key: "s6", label: "S6 — Perplexity: intencja zakupowa (sonar)" },
+  { key: "s7", label: "S7 — Perplexity: pracownicy LinkedIn (sonar)" },
+  { key: "places", label: "Places API — Google Maps" },
+  { key: "employees_parsed", label: "Employees parsed — Gemini output" },
+];
+
+function DebugPanel({ debug }: { debug: Record<string, unknown> }) {
+  return (
+    <div className="mt-8 border border-orange-200 rounded-xl overflow-hidden print:hidden">
+      <div className="px-5 py-3 bg-orange-50 border-b border-orange-200">
+        <h3 className="font-semibold text-orange-800 text-sm">🐛 Debug — raw outputs</h3>
+      </div>
+      <div className="divide-y divide-orange-100">
+        {DEBUG_STEPS.map(({ key, label }) => {
+          const value = debug[key];
+          const isEmpty = value === null || value === undefined || value === "";
+          return (
+            <details key={key} className="group">
+              <summary className="flex items-center justify-between px-5 py-3 cursor-pointer hover:bg-orange-50 text-sm">
+                <span className={isEmpty ? "text-gray-400" : "text-gray-800"}>{label}</span>
+                <span className={`text-xs px-2 py-0.5 rounded ${isEmpty ? "bg-gray-100 text-gray-400" : "bg-green-100 text-green-700"}`}>
+                  {isEmpty ? "empty" : "ok"}
+                </span>
+              </summary>
+              <div className="px-5 pb-4">
+                <pre className="text-xs bg-gray-50 border border-gray-200 rounded p-3 overflow-auto max-h-96 whitespace-pre-wrap break-words">
+                  {typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+                </pre>
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function BriefView({ brief, debug }: { brief: LeadBrief; debug?: Record<string, unknown> | null }) {
   const handlePrint = () => window.print();
   const handleCopy = () => {
     const text = JSON.stringify(brief, null, 2);
@@ -412,7 +458,7 @@ export function BriefView({ brief }: { brief: LeadBrief }) {
         <FieldRow label="Używał wcześniej" field={brief.buying_readiness.used_similar_solution_before as DataField<unknown>} />
       </Section>
 
-      {/* Recommended questions — call plan */}
+      {/* Call plan */}
       <Section title="Plan rozmowy">
         <div className="grid md:grid-cols-2 gap-6">
           <div>
@@ -461,6 +507,8 @@ export function BriefView({ brief }: { brief: LeadBrief }) {
           </div>
         </div>
       </Section>
+
+      {debug && <DebugPanel debug={debug} />}
     </div>
   );
 }

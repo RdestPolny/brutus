@@ -149,7 +149,22 @@ export async function POST(req: NextRequest) {
       score,
     };
 
-    return NextResponse.json(brief);
+    const _debug = {
+      preprocess,
+      f1_website: websiteResult,
+      krs: krsContext ?? null,
+      s1: s1Raw,
+      s2: s2Raw,
+      s3: s3Raw,
+      s4: s4Raw,
+      s5: s5Raw,
+      s6: s6Raw,
+      s7: s7Raw,
+      places: placeData,
+      employees_parsed: employees,
+    };
+
+    return NextResponse.json({ ...brief, _debug });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error";
     console.error("[brief] error:", err);
