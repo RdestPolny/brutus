@@ -1,9 +1,14 @@
 const FIRECRAWL_API = "https://api.firecrawl.dev";
 
+export interface WebsiteScrapeResult {
+  text: string;        // formatted context for Gemini
+  address: string | null; // extracted address for Places API
+}
+
 // F1: scrape company website for structured context — business description, contact, social links
-export async function scrapeCompanyWebsite(domain: string): Promise<string> {
+export async function scrapeCompanyWebsite(domain: string): Promise<WebsiteScrapeResult> {
   const apiKey = process.env.FIRECRAWL_API_KEY;
-  if (!apiKey) return "";
+  if (!apiKey) return { text: "", address: null };
 
   try {
     const url = domain.startsWith("http") ? domain : `https://${domain}`;
@@ -47,11 +52,11 @@ export async function scrapeCompanyWebsite(domain: string): Promise<string> {
       }),
     });
 
-    if (!res.ok) return "";
+    if (!res.ok) return { text: "", address: null };
 
     const data = await res.json();
     const extracted = data?.data?.extract;
-    if (!extracted) return "";
+    if (!extracted) return { text: "", address: null };
 
     const parts: string[] = [`=== DANE ZE STRONY FIRMOWEJ (${url}) ===`];
     if (extracted.business_description)
@@ -67,11 +72,14 @@ export async function scrapeCompanyWebsite(domain: string): Promise<string> {
       const links = Object.entries(socials)
         .filter(([, v]) => v)
         .map(([k, v]) => `${k}: ${v}`);
-      if (links.length > 0) parts.push(`Social media: ${links.join(", ")}`);
+      if (links.length > 0) parts.push(`Social media (ze strony): ${links.join(", ")}`);
     }
 
-    return parts.join("\n");
+    return {
+      text: parts.join("\n"),
+      address: extracted.address ?? null,
+    };
   } catch {
-    return "";
+    return { text: "", address: null };
   }
 }

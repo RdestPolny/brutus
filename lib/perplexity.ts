@@ -188,6 +188,28 @@ Podaj: otwarte wakaty (jakie role — sygnał gdzie inwestują), wielkość zesp
   );
 }
 
+// S7 — LinkedIn employees: targeted people search with profile links (sonar)
+export async function searchLinkedInEmployees(input: LeadInput): Promise<string> {
+  const { companyName: name, domain } = input;
+
+  return searchSonar(
+    `Znajdź pracowników firmy "${name}" (${domain}) na LinkedIn i zwróć listę z bezpośrednimi linkami do profili.
+
+Wyszukaj:
+- site:linkedin.com/in "${name}" — pracownicy wymienieni z nazwą firmy
+- "${domain}" site:linkedin.com/in — profile powiązane z domeną
+- "${name}" LinkedIn pracownicy zarząd sprzedaż marketing
+
+Dla każdej znalezionej osoby podaj:
+- Pełne imię i nazwisko
+- Stanowisko
+- Pełny URL profilu LinkedIn (linkedin.com/in/slug)
+
+Priorytetyzuj: właściciele, C-level, dyrektorzy sprzedaży i marketingu. Zwróć TYLKO potwierdzone profile z działającymi URL-ami.`,
+    SONAR
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Legacy exports — kept for backward compatibility during migration
 // ---------------------------------------------------------------------------
