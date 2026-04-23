@@ -1,6 +1,6 @@
 "use client";
 
-import type { LeadBrief, DataField, LeadScore, RiskLevel, FieldStatus } from "@/lib/types";
+import type { LeadBrief, DataField, LeadScore, RiskLevel, FieldStatus, DecisionMaker } from "@/lib/types";
 
 const STATUS_LABELS: Record<FieldStatus, string> = {
   confirmed: "Potwierdzone",
@@ -81,6 +81,83 @@ function ScoreBar({ label, value, inverse = false }: { label: string; value: num
         <div className={`h-full rounded-full ${displayColor}`} style={{ width: `${value}%` }} />
       </div>
     </div>
+  );
+}
+
+const SOCIAL_ICONS: Record<string, string> = {
+  linkedin: "in",
+  facebook: "fb",
+  instagram: "ig",
+  youtube: "yt",
+  tiktok: "tt",
+  twitter: "tw",
+  x: "x",
+};
+
+function SocialLinks({ field }: { field: DataField<string[]> }) {
+  if (!field.value || field.value.length === 0) {
+    return <span className="text-sm text-gray-400 italic">— brak danych</span>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {field.value.map((entry, i) => {
+        const [platform, ...rest] = entry.split(": ");
+        const url = rest.join(": ").trim();
+        const label = SOCIAL_ICONS[platform.toLowerCase()] ?? platform;
+        return (
+          <a
+            key={i}
+            href={url.startsWith("http") ? url : `https://${url}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded border border-blue-200 hover:bg-blue-100"
+          >
+            {label}
+          </a>
+        );
+      })}
+    </div>
+  );
+}
+
+function EmployeesTable({ field }: { field: DataField<DecisionMaker[]> }) {
+  if (!field.value || field.value.length === 0) {
+    return <span className="text-sm text-gray-400 italic">— brak danych</span>;
+  }
+
+  return (
+    <table className="w-full text-sm mt-1">
+      <thead>
+        <tr className="text-left text-gray-500 border-b">
+          <th className="pb-1 font-normal">Imię i nazwisko</th>
+          <th className="pb-1 font-normal">Stanowisko</th>
+          <th className="pb-1 font-normal">LinkedIn</th>
+        </tr>
+      </thead>
+      <tbody>
+        {field.value.map((p, i) => (
+          <tr key={i} className="border-b border-gray-100">
+            <td className="py-1.5 font-medium">{p.name}</td>
+            <td className="py-1.5 text-gray-600">{p.role}</td>
+            <td className="py-1.5">
+              {p.linkedinUrl ? (
+                <a
+                  href={p.linkedinUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline"
+                >
+                  profil →
+                </a>
+              ) : (
+                <span className="text-gray-300">—</span>
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -193,7 +270,12 @@ export function BriefView({ brief }: { brief: LeadBrief }) {
           <FieldRow label="Model biznesowy" field={brief.company_profile.business_model} />
           <FieldRow label="Adres / telefon" field={brief.company_profile.contact_address} />
           <FieldRow label="Domena (WHOIS)" field={brief.company_profile.website_domain_registered} />
-          <FieldRow label="Social media" field={brief.company_profile.social_links as DataField<unknown>} />
+          <div className="flex items-start gap-3 py-2 border-b border-gray-100">
+            <div className="w-40 shrink-0 text-sm text-gray-500">Social media</div>
+            <div className="flex-1">
+              <SocialLinks field={brief.company_profile.social_links} />
+            </div>
+          </div>
           <FieldRow label="Google Maps" field={brief.company_profile.google_maps_link} />
         </div>
       </Section>
@@ -311,6 +393,13 @@ export function BriefView({ brief }: { brief: LeadBrief }) {
         <FieldRow label="Dział sprzedaży" field={brief.decision_structure.has_sales_team as DataField<unknown>} />
         <FieldRow label="Model sprzedaży" field={brief.decision_structure.sales_model} />
         <FieldRow label="Komitet zakupowy" field={brief.decision_structure.buying_committee_complexity as DataField<unknown>} />
+        {brief.decision_structure.key_decision_makers.value &&
+          brief.decision_structure.key_decision_makers.value.length > 0 && (
+            <div className="mt-4">
+              <p className="text-sm font-medium text-gray-700 mb-2">Pracownicy / decydenci</p>
+              <EmployeesTable field={brief.decision_structure.key_decision_makers} />
+            </div>
+          )}
       </Section>
 
       {/* Buying readiness */}

@@ -76,6 +76,12 @@ export interface RiskSection {
   summary: string;
 }
 
+export interface DecisionMaker {
+  name: string;
+  role: string;
+  linkedinUrl: string | null;
+}
+
 export interface DecisionStructure {
   contact_role_in_hierarchy: DataField;
   marketing_team_size: DataField<string>;
@@ -84,7 +90,7 @@ export interface DecisionStructure {
   buying_committee_complexity: DataField<"simple" | "medium" | "complex">;
   decision_maker_type: DataField<"owner" | "director" | "manager" | "specialist">;
   linkedin_company_url: DataField;
-  key_decision_makers: DataField<string[]>;
+  key_decision_makers: DataField<DecisionMaker[]>;
   summary: string;
 }
 

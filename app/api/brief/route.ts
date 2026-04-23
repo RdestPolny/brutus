@@ -90,6 +90,28 @@ export async function POST(req: NextRequest) {
         structureBuyingReadiness(buyingContext, input),
       ]);
 
+    // Override social_links with Firecrawl data — authoritative (direct from website)
+    if (websiteResult.socialLinks) {
+      company_profile.social_links = {
+        value: Object.entries(websiteResult.socialLinks).map(([k, v]) => `${k}: ${v}`),
+        confidence: 0.95,
+        status: "confirmed",
+        source_urls: [`https://${input.domain}`],
+        evidence_excerpt: "Wyciągnięte bezpośrednio ze strony firmowej przez Firecrawl",
+      };
+    }
+
+    // Override google_maps_link from Places API if available
+    if (placeData.mapsLink) {
+      company_profile.google_maps_link = {
+        value: placeData.mapsLink,
+        confidence: 0.99,
+        status: "confirmed",
+        source_urls: [placeData.mapsLink],
+        evidence_excerpt: `Google Places API: ${placeData.rating ?? "?"}/5 (${placeData.reviewCount ?? "?"} opinii)`,
+      };
+    }
+
     const context = [
       `Profil: ${company_profile.summary}`,
       `Sygnały wzrostu: ${growth.summary}`,

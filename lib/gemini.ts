@@ -163,11 +163,17 @@ Zwróć JSON o DOKŁADNIE tej strukturze:
   "buying_committee_complexity": { "value": "simple|medium|complex", "confidence": 0.0, "status": "...", "source_urls": [], "evidence_excerpt": "" },
   "decision_maker_type": { "value": "owner|director|manager|specialist", "confidence": 0.0, "status": "...", "source_urls": [], "evidence_excerpt": "" },
   "linkedin_company_url": { "value": "https://linkedin.com/company/...", "confidence": 0.0, "status": "...", "source_urls": [], "evidence_excerpt": "" },
-  "key_decision_makers": { "value": ["Imię Nazwisko — Stanowisko — linkedin.com/in/slug"], "confidence": 0.0, "status": "...", "source_urls": [], "evidence_excerpt": "" },
+  "key_decision_makers": {
+    "value": [
+      { "name": "Jan Kowalski", "role": "Prezes Zarządu", "linkedinUrl": "https://linkedin.com/in/jan-kowalski" },
+      { "name": "Anna Nowak", "role": "Dyrektor Marketingu", "linkedinUrl": null }
+    ],
+    "confidence": 0.0, "status": "...", "source_urls": [], "evidence_excerpt": ""
+  },
   "summary": "2–4 zdania o strukturze decyzyjnej"
 }
 
-WAŻNE dla key_decision_makers.value: wypisz WSZYSTKICH znalezionych pracowników z surowych danych. Dla każdej osoby z LinkedIn URL — format: "Imię Nazwisko — Stanowisko — pełny URL". Bez URL: "Imię Nazwisko — Stanowisko". NIE POMIJAJ żadnej znalezionej osoby.`;
+WAŻNE dla key_decision_makers.value: wypisz WSZYSTKICH znalezionych pracowników jako obiekty {name, role, linkedinUrl}. linkedinUrl = pełny URL linkedin.com/in/... jeśli znaleziony, inaczej null. NIE POMIJAJ żadnej znalezionej osoby.`;
 
   const raw_json = await callGemini(STRUCTURE_SYSTEM, prompt);
   return JSON.parse(raw_json) as DecisionStructure;

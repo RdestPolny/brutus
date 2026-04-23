@@ -1,14 +1,15 @@
 const FIRECRAWL_API = "https://api.firecrawl.dev";
 
 export interface WebsiteScrapeResult {
-  text: string;        // formatted context for Gemini
-  address: string | null; // extracted address for Places API
+  text: string;                             // formatted context for Gemini
+  address: string | null;                   // for Places API
+  socialLinks: Record<string, string> | null; // direct from website — authoritative
 }
 
 // F1: scrape company website for structured context — business description, contact, social links
 export async function scrapeCompanyWebsite(domain: string): Promise<WebsiteScrapeResult> {
   const apiKey = process.env.FIRECRAWL_API_KEY;
-  if (!apiKey) return { text: "", address: null };
+  if (!apiKey) return { text: "", address: null, socialLinks: null };
 
   try {
     const url = domain.startsWith("http") ? domain : `https://${domain}`;
@@ -52,11 +53,11 @@ export async function scrapeCompanyWebsite(domain: string): Promise<WebsiteScrap
       }),
     });
 
-    if (!res.ok) return { text: "", address: null };
+    if (!res.ok) return { text: "", address: null, socialLinks: null };
 
     const data = await res.json();
     const extracted = data?.data?.extract;
-    if (!extracted) return { text: "", address: null };
+    if (!extracted) return { text: "", address: null, socialLinks: null };
 
     const parts: string[] = [`=== DANE ZE STRONY FIRMOWEJ (${url}) ===`];
     if (extracted.business_description)
@@ -75,11 +76,21 @@ export async function scrapeCompanyWebsite(domain: string): Promise<WebsiteScrap
       if (links.length > 0) parts.push(`Social media (ze strony): ${links.join(", ")}`);
     }
 
+    const rawSocials = extracted.social_links ?? null;
+    const socialLinks: Record<string, string> | null = rawSocials
+      ? Object.fromEntries(
+          Object.entries(rawSocials as Record<string, unknown>).filter(
+            ([, v]) => v && typeof v === "string"
+          ) as [string, string][]
+        )
+      : null;
+
     return {
       text: parts.join("\n"),
       address: extracted.address ?? null,
+      socialLinks: socialLinks && Object.keys(socialLinks).length > 0 ? socialLinks : null,
     };
   } catch {
-    return { text: "", address: null };
+    return { text: "", address: null, socialLinks: null };
   }
 }
