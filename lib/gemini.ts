@@ -8,6 +8,7 @@ import type {
   RecommendedQuestions,
 } from "./types";
 
+// Model locked by owner — do NOT change without explicit request from @marcinek
 const GEMINI_MODEL = "gemini-3.1-flash-lite-preview";
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
