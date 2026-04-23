@@ -1,19 +1,29 @@
 const FIRECRAWL_API = "https://api.firecrawl.dev";
 
+const SOCIAL_DOMAINS: Record<string, string> = {
+  "linkedin.com/company": "linkedin",
+  "facebook.com": "facebook",
+  "instagram.com": "instagram",
+  "youtube.com": "youtube",
+  "tiktok.com": "tiktok",
+  "twitter.com": "twitter",
+  "x.com": "x",
+};
+
 export interface WebsiteScrapeResult {
-  text: string;                             // formatted context for Gemini
-  address: string | null;                   // for Places API
-  socialLinks: Record<string, string> | null; // direct from website — authoritative
+  text: string;                               // formatted context for Gemini
+  address: string | null;                     // for Places API
+  socialLinks: Record<string, string> | null; // deterministic from page links
 }
 
-// F1: scrape company website for structured context — business description, contact, social links
+// F1: scrape company website — social links via /links (deterministic), address via /extract
 export async function scrapeCompanyWebsite(domain: string): Promise<WebsiteScrapeResult> {
   const apiKey = process.env.FIRECRAWL_API_KEY;
   if (!apiKey) return { text: "", address: null, socialLinks: null };
 
-  try {
-    const url = domain.startsWith("http") ? domain : `https://${domain}`;
+  const url = domain.startsWith("http") ? domain : `https://${domain}`;
 
+  try {
     const res = await fetch(`${FIRECRAWL_API}/v1/scrape`, {
       method: "POST",
       headers: {
@@ -22,30 +32,15 @@ export async function scrapeCompanyWebsite(domain: string): Promise<WebsiteScrap
       },
       body: JSON.stringify({
         url,
-        formats: ["extract"],
+        formats: ["links", "extract"],
         extract: {
-          prompt:
-            "Wyciągnij: opis działalności firmy i model biznesowy, adres biura i telefon, linki do social mediów (LinkedIn, Facebook, Instagram, YouTube, TikTok, X/Twitter), datę ostatniej aktualizacji strony, informacje o zespole lub strukturze firmy jeśli widoczne.",
+          prompt: "Wyciągnij adres biura (ulica, kod pocztowy, miasto) i numer telefonu stacjonarnego.",
           schema: {
             type: "object",
             properties: {
-              business_description: { type: "string" },
-              business_model: { type: "string" },
               address: { type: "string" },
               phone: { type: "string" },
-              social_links: {
-                type: "object",
-                properties: {
-                  linkedin: { type: "string" },
-                  facebook: { type: "string" },
-                  instagram: { type: "string" },
-                  youtube: { type: "string" },
-                  tiktok: { type: "string" },
-                  twitter: { type: "string" },
-                },
-              },
-              last_updated: { type: "string" },
-              team_info: { type: "string" },
+              business_description: { type: "string" },
             },
           },
         },
@@ -56,39 +51,44 @@ export async function scrapeCompanyWebsite(domain: string): Promise<WebsiteScrap
     if (!res.ok) return { text: "", address: null, socialLinks: null };
 
     const data = await res.json();
-    const extracted = data?.data?.extract;
-    if (!extracted) return { text: "", address: null, socialLinks: null };
+    const pageData = data?.data;
+    if (!pageData) return { text: "", address: null, socialLinks: null };
 
-    const parts: string[] = [`=== DANE ZE STRONY FIRMOWEJ (${url}) ===`];
-    if (extracted.business_description)
-      parts.push(`Opis: ${extracted.business_description}`);
-    if (extracted.business_model) parts.push(`Model biznesowy: ${extracted.business_model}`);
-    if (extracted.address) parts.push(`Adres: ${extracted.address}`);
-    if (extracted.phone) parts.push(`Telefon: ${extracted.phone}`);
-    if (extracted.team_info) parts.push(`Zespół: ${extracted.team_info}`);
-    if (extracted.last_updated) parts.push(`Ostatnia aktualizacja: ${extracted.last_updated}`);
-
-    const socials = extracted.social_links;
-    if (socials) {
-      const links = Object.entries(socials)
-        .filter(([, v]) => v)
-        .map(([k, v]) => `${k}: ${v}`);
-      if (links.length > 0) parts.push(`Social media (ze strony): ${links.join(", ")}`);
+    // --- Social links: deterministic from all page links ---
+    const allLinks: string[] = pageData.links ?? [];
+    const socialLinks: Record<string, string> = {};
+    for (const link of allLinks) {
+      for (const [domainKey, label] of Object.entries(SOCIAL_DOMAINS)) {
+        if (link.includes(domainKey) && !socialLinks[label]) {
+          // Skip generic/home pages like linkedin.com/company without slug
+          const cleanUrl = link.split("?")[0].replace(/\/$/, "");
+          if (cleanUrl.split("/").length >= 5) {
+            socialLinks[label] = cleanUrl;
+          }
+        }
+      }
     }
 
-    const rawSocials = extracted.social_links ?? null;
-    const socialLinks: Record<string, string> | null = rawSocials
-      ? Object.fromEntries(
-          Object.entries(rawSocials as Record<string, unknown>).filter(
-            ([, v]) => v && typeof v === "string"
-          ) as [string, string][]
-        )
-      : null;
+    // --- Address/description from extract ---
+    const extracted = pageData.extract;
+    const address = extracted?.address ?? null;
+
+    const parts: string[] = [`=== DANE ZE STRONY FIRMOWEJ (${url}) ===`];
+    if (extracted?.business_description) parts.push(`Opis: ${extracted.business_description}`);
+    if (address) parts.push(`Adres: ${address}`);
+    if (extracted?.phone) parts.push(`Telefon: ${extracted.phone}`);
+    if (Object.keys(socialLinks).length > 0) {
+      parts.push(
+        `Social media (ze strony): ${Object.entries(socialLinks)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(", ")}`
+      );
+    }
 
     return {
       text: parts.join("\n"),
-      address: extracted.address ?? null,
-      socialLinks: socialLinks && Object.keys(socialLinks).length > 0 ? socialLinks : null,
+      address,
+      socialLinks: Object.keys(socialLinks).length > 0 ? socialLinks : null,
     };
   } catch {
     return { text: "", address: null, socialLinks: null };

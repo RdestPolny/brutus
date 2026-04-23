@@ -15,6 +15,7 @@ import {
   structureDecisionStructure,
   structureBuyingReadiness,
   generateRecommendedQuestions,
+  structureEmployees,
 } from "@/lib/gemini";
 import { fetchKrsEnrichedData, formatKrsContext } from "@/lib/krs";
 import { scrapeCompanyWebsite } from "@/lib/firecrawl";
@@ -81,14 +82,27 @@ export async function POST(req: NextRequest) {
     const buyingContext = s6Raw;
 
     // Stage 3: Gemini structuring — parallel
-    const [company_profile, growth, risks, decision_structure, buying_readiness] =
+    // structureEmployees gets ONLY s7Raw — dedicated call, no noise from other context
+    const [company_profile, growth, risks, decision_structure, buying_readiness, employees] =
       await Promise.all([
         structureCompanyProfile(companyContext, input),
         structureGrowthSection(growthContext),
         structureRiskSection(riskContext, krsContext),
-        structureDecisionStructure(decisionContext, input, krsManagement),
+        structureDecisionStructure([s2Raw, websiteResult.text].filter(Boolean).join("\n\n---\n\n"), input, krsManagement),
         structureBuyingReadiness(buyingContext, input),
+        structureEmployees(s7Raw),
       ]);
+
+    // Override key_decision_makers with dedicated S7 structuring
+    if (employees.length > 0) {
+      decision_structure.key_decision_makers = {
+        value: employees,
+        confidence: 0.8,
+        status: "inferred",
+        source_urls: [],
+        evidence_excerpt: `${employees.length} pracowników znalezionych na LinkedIn`,
+      };
+    }
 
     // Override social_links with Firecrawl data — authoritative (direct from website)
     if (websiteResult.socialLinks) {

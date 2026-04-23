@@ -6,6 +6,7 @@ import type {
   DecisionStructure,
   BuyingReadiness,
   RecommendedQuestions,
+  DecisionMaker,
 } from "./types";
 
 // Model locked by owner — do NOT change without explicit request from @marcinek
@@ -232,4 +233,35 @@ Dokładnie 5 hipotez, 5 pytań, 3 obiekcje, 2–3 kąty wejścia. Wszystko dopas
     prompt
   );
   return JSON.parse(raw_json) as RecommendedQuestions;
+}
+
+// Dedicated employee structuring — receives ONLY S7 raw text, returns clean list
+export async function structureEmployees(raw: string): Promise<DecisionMaker[]> {
+  if (!raw.trim()) return [];
+
+  const prompt = `Poniżej wyniki wyszukiwania pracowników firmy na LinkedIn.
+
+SUROWE DANE:
+${raw}
+
+Zwróć tablicę JSON z WSZYSTKIMI znalezionymi osobami:
+[
+  { "name": "Jan Kowalski", "role": "Prezes Zarządu", "linkedinUrl": "https://www.linkedin.com/in/jan-kowalski" },
+  { "name": "Anna Nowak", "role": "Dyrektor Marketingu", "linkedinUrl": null }
+]
+
+Zasady:
+- linkedinUrl = pełny URL linkedin.com/in/... jeśli znaleziony, inaczej null
+- Priorytet: właściciele, C-level, dyrektorzy — ale wypisz WSZYSTKICH znalezionych
+- Jeśli brak danych — zwróć []`;
+
+  const raw_json = await callGemini(
+    "Wyciągasz listę pracowników firmy z surowych danych wyszukiwania. Zwróć TYLKO tablicę JSON.",
+    prompt
+  );
+  try {
+    return JSON.parse(raw_json) as DecisionMaker[];
+  } catch {
+    return [];
+  }
 }
