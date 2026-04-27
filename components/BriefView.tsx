@@ -216,16 +216,14 @@ function ScoreCard({ score }: { score: LeadScore }) {
 
 const DEBUG_STEPS = [
   { key: "preprocess", label: "Step 0 — Preprocessing (Gemini Flash)" },
-  { key: "f1_website", label: "F1 — Firecrawl: strona firmowa" },
-  { key: "krs", label: "F2 — KRS (sformatowany kontekst)" },
-  { key: "s1", label: "S1 — Perplexity: firmograficzne (sonar)" },
-  { key: "s2", label: "S2 — Perplexity: struktura korporacyjna (sonar-pro)" },
-  { key: "s3", label: "S3 — Perplexity: bieżące wydarzenia (sonar-pro)" },
-  { key: "s4", label: "S4 — Perplexity: digital presence (sonar)" },
-  { key: "s5", label: "S5 — Perplexity: kontekst branżowy (sonar-pro)" },
-  { key: "s6", label: "S6 — Perplexity: intencja zakupowa (sonar)" },
-  { key: "s7", label: "S7 — Perplexity: pracownicy LinkedIn (sonar)" },
+  { key: "f1_website", label: "Source — Firecrawl: strona firmowa" },
+  { key: "krs", label: "Source — KRS / eKRS" },
   { key: "places", label: "Places API — Google Maps" },
+  { key: "source_context", label: "Source context — przekazany do researchu" },
+  { key: "r1_profile_gaps", label: "R1 — Perplexity: luki firmograficzne" },
+  { key: "r2_corporate_decision", label: "R2 — Perplexity: struktura i decydenci" },
+  { key: "r3_growth_buying", label: "R3 — Perplexity: wzrost i gotowość zakupowa" },
+  { key: "r4_industry_risks", label: "R4 — Perplexity: branża i ryzyka" },
   { key: "employees_parsed", label: "Employees parsed — Gemini output" },
 ];
 

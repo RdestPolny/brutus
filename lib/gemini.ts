@@ -235,7 +235,7 @@ Dokładnie 5 hipotez, 5 pytań, 3 obiekcje, 2–3 kąty wejścia. Wszystko dopas
   return JSON.parse(raw_json) as RecommendedQuestions;
 }
 
-// Dedicated employee structuring — receives ONLY S7 raw text, returns clean list
+// Dedicated employee structuring — receives only the people-focused research batch.
 export async function structureEmployees(raw: string): Promise<DecisionMaker[]> {
   if (!raw.trim()) return [];
 

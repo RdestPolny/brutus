@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  searchS1Firmographics,
-  searchS2Corporate,
-  searchS3Events,
-  searchS4Digital,
-  searchS5Industry,
-  searchS6Intent,
-  searchLinkedInEmployees,
+  researchCorporateAndDecisionMakers,
+  researchFirmographicGaps,
+  researchGrowthAndBuyingSignals,
+  researchIndustryAndRisks,
+  type ResearchSourceContext,
 } from "@/lib/perplexity";
 import {
   structureCompanyProfile,
@@ -43,57 +41,69 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // Stage 0: preprocessing — detect industry for S5 cache, normalize name
+    // Stage 0: preprocessing — detect industry for the industry research batch
     const preprocess = await preprocessLead(input);
 
-    // Stage 1: parallel — F1 (website) + F2 (KRS) + S1–S5 + S7 (LinkedIn employees)
-    const [websiteResult, krsData, s1Raw, s2Raw, s3Raw, s4Raw, s5Raw, s7Raw] =
-      await Promise.all([
-        scrapeCompanyWebsite(input.domain),
-        input.krs ? fetchKrsEnrichedData(input.krs) : Promise.resolve(null),
-        searchS1Firmographics(input),
-        searchS2Corporate(input),
-        searchS3Events(input),
-        searchS4Digital(input),
-        searchS5Industry(input, preprocess.industrySlug),
-        searchLinkedInEmployees(input),
-      ]);
+    // Stage 1: source-first facts. These are authoritative enough that we should not ask
+    // Perplexity to rediscover them.
+    const [websiteResult, krsData] = await Promise.all([
+      scrapeCompanyWebsite(input.domain),
+      input.krs ? fetchKrsEnrichedData(input.krs) : Promise.resolve(null),
+    ]);
 
     const krsContext = krsData ? formatKrsContext(krsData) : undefined;
     const krsManagement = krsData?.basic?.management?.length
       ? krsData.basic.management.map((p) => `${p.name} — ${p.role}`).join("\n")
       : undefined;
 
-    // Stage 2: S6 (uses S4 LinkedIn URL) + Places API (uses F1 address) — parallel
-    const [s6Raw, placeData] = await Promise.all([
-      searchS6Intent(input, s4Raw),
-      fetchPlaceData(input.companyName, websiteResult.address),
-    ]);
+    const placeData = await fetchPlaceData(
+      input.companyName,
+      websiteResult.address ?? krsData?.basic?.address ?? null
+    );
+
+    const sourceContext: ResearchSourceContext = {
+      website: websiteResult.text,
+      krs: krsContext,
+      places: placeData.context,
+    };
+    const linkedinCompanyUrl = websiteResult.socialLinks?.linkedin ?? null;
+
+    // Stage 2: thematic research batches. Perplexity receives source context and is only
+    // asked for facts that require external research.
+    const [profileResearch, corporateResearch, growthBuyingResearch, industryRiskResearch] =
+      await Promise.all([
+        researchFirmographicGaps(input, sourceContext),
+        researchCorporateAndDecisionMakers(input, sourceContext),
+        researchGrowthAndBuyingSignals(input, sourceContext, linkedinCompanyUrl),
+        researchIndustryAndRisks(input, preprocess.industrySlug, sourceContext),
+      ]);
 
     // Build rich context strings for each Gemini structuring call
-    const companyContext = [websiteResult.text, s1Raw, s4Raw, placeData.context]
+    const companyContext = [websiteResult.text, krsContext, placeData.context, profileResearch]
       .filter(Boolean)
       .join("\n\n---\n\n");
-    // Decision structure: corporate changes (S2) + LinkedIn employees (S7) + website
-    const decisionContext = [s2Raw, s7Raw, websiteResult.text].filter(Boolean).join("\n\n---\n\n");
-    const growthContext = s3Raw;
-    // Risk: corporate changes (S2) + industry context (S5) + Google reviews from Places
-    const riskContext = [s2Raw, s5Raw, placeData.context].filter(Boolean).join("\n\n---\n\n");
-    const buyingContext = s6Raw;
+    const decisionContext = [krsContext, corporateResearch, websiteResult.text]
+      .filter(Boolean)
+      .join("\n\n---\n\n");
+    const growthContext = growthBuyingResearch;
+    const riskContext = [krsContext, placeData.context, corporateResearch, industryRiskResearch]
+      .filter(Boolean)
+      .join("\n\n---\n\n");
+    const buyingContext = growthBuyingResearch;
 
     // Stage 3: Gemini structuring — parallel
-    // structureEmployees gets ONLY s7Raw — dedicated call, no noise from other context
+    // structureEmployees gets the people-focused research batch only.
     const [company_profile, growth, risks, decision_structure, buying_readiness, employees] =
       await Promise.all([
         structureCompanyProfile(companyContext, input),
         structureGrowthSection(growthContext),
         structureRiskSection(riskContext, krsContext),
-        structureDecisionStructure([s2Raw, websiteResult.text].filter(Boolean).join("\n\n---\n\n"), input, krsManagement),
+        structureDecisionStructure(decisionContext, input, krsManagement),
         structureBuyingReadiness(buyingContext, input),
-        structureEmployees(s7Raw),
+        structureEmployees(corporateResearch),
       ]);
 
-    // Override key_decision_makers with dedicated S7 structuring
+    // Override key_decision_makers with dedicated people structuring
     if (employees.length > 0) {
       decision_structure.key_decision_makers = {
         value: employees,
@@ -101,6 +111,46 @@ export async function POST(req: NextRequest) {
         status: "inferred",
         source_urls: [],
         evidence_excerpt: `${employees.length} pracowników znalezionych na LinkedIn`,
+      };
+    }
+
+    // Source-first overrides: direct source data wins over model-inferred fields.
+    const sourceAddress = websiteResult.address ?? placeData.formattedAddress ?? krsData?.basic?.address;
+    if (sourceAddress) {
+      const addressSourceUrl = websiteResult.address
+        ? `https://${input.domain}`
+        : placeData.mapsLink ?? (input.krs ? "https://api-krs.ms.gov.pl" : "");
+      company_profile.contact_address = {
+        value: sourceAddress,
+        confidence: 0.95,
+        status: "confirmed",
+        source_urls: [addressSourceUrl].filter(Boolean),
+        evidence_excerpt: websiteResult.address
+          ? "Adres wyciągnięty bezpośrednio ze strony firmowej przez Firecrawl"
+          : "Adres pobrany ze źródła urzędowego lub Google Places",
+      };
+    }
+
+    if (krsData?.basic?.registrationDate) {
+      const year = Number(krsData.basic.registrationDate.slice(0, 4));
+      if (Number.isFinite(year)) {
+        company_profile.founded_year = {
+          value: year,
+          confidence: 0.95,
+          status: "confirmed",
+          source_urls: ["https://api-krs.ms.gov.pl"],
+          evidence_excerpt: `Data rejestracji w KRS: ${krsData.basic.registrationDate}`,
+        };
+      }
+    }
+
+    if (krsData?.basic?.legalForm) {
+      company_profile.company_structure = {
+        value: krsData.basic.legalForm,
+        confidence: 0.95,
+        status: "confirmed",
+        source_urls: ["https://api-krs.ms.gov.pl"],
+        evidence_excerpt: "Forma prawna pobrana z KRS",
       };
     }
 
@@ -112,6 +162,16 @@ export async function POST(req: NextRequest) {
         status: "confirmed",
         source_urls: [`https://${input.domain}`],
         evidence_excerpt: "Wyciągnięte bezpośrednio ze strony firmowej przez Firecrawl",
+      };
+    }
+
+    if (linkedinCompanyUrl) {
+      decision_structure.linkedin_company_url = {
+        value: linkedinCompanyUrl,
+        confidence: 0.95,
+        status: "confirmed",
+        source_urls: [`https://${input.domain}`],
+        evidence_excerpt: "Link do LinkedIn znaleziony bezpośrednio na stronie firmowej przez Firecrawl",
       };
     }
 
@@ -153,14 +213,12 @@ export async function POST(req: NextRequest) {
       preprocess,
       f1_website: websiteResult,
       krs: krsContext ?? null,
-      s1: s1Raw,
-      s2: s2Raw,
-      s3: s3Raw,
-      s4: s4Raw,
-      s5: s5Raw,
-      s6: s6Raw,
-      s7: s7Raw,
       places: placeData,
+      source_context: sourceContext,
+      r1_profile_gaps: profileResearch,
+      r2_corporate_decision: corporateResearch,
+      r3_growth_buying: growthBuyingResearch,
+      r4_industry_risks: industryRiskResearch,
       employees_parsed: employees,
     };
 
