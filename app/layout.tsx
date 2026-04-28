@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Prezesol — Lead Intelligence",
-  description: "Automatyczny brief przed rozmową sprzedażową",
+  title: "Prezesol",
+  description: "Raport firmowy po NIP",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
