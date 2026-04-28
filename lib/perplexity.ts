@@ -35,7 +35,8 @@ export async function askPerplexityTable(prompt: string): Promise<string> {
 }
 
 export function buildRegistryPrompt(nip: string): string {
-  return `Nip firmy: ${nip}, podaj Nazwę, KRS, adres, formę prawną, kapitał zakładowy, datę rejestracji i główną działalność. W tabeli, bez dodatkowego komentarza.`;
+  return `Nip firmy: ${nip}, podaj Nazwę, KRS, adres, formę prawną, kapitał zakładowy, datę rejestracji i główną działalność. W tabeli, bez dodatkowego komentarza.
+Tabela musi mieć dokładnie kolumny: Nazwa | KRS | Adres | Forma prawna | Kapitał zakładowy | Data rejestracji | Główna działalność.`;
 }
 
 export function buildDigitalPresencePrompt(companyName: string): string {

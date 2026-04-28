@@ -69,7 +69,11 @@ export async function POST(req: NextRequest) {
 }
 
 function parseRegistryRows(markdown: string): CompanyRegistryRow[] {
-  return parseMarkdownTable(markdown).map((row) => ({
+  const tableRows = parseMarkdownTable(markdown);
+  const keyValueRow = registryKeyValueRow(tableRows);
+  const rowsToMap = keyValueRow ? [keyValueRow] : tableRows;
+
+  return rowsToMap.map((row) => ({
     name: pickValue(row, ["Nazwa", "Nazwa firmy", "Firma"]),
     krs: pickValue(row, ["KRS", "Numer KRS"]),
     address: pickValue(row, ["Adres", "Siedziba", "Adres siedziby"]),
@@ -78,6 +82,27 @@ function parseRegistryRows(markdown: string): CompanyRegistryRow[] {
     registrationDate: pickValue(row, ["Data rejestracji", "Rejestracja"]),
     mainActivity: pickValue(row, ["Główna działalność", "Glowna dzialalnosc", "PKD"]),
   }));
+}
+
+function registryKeyValueRow(rows: Record<string, string>[]): Record<string, string> | null {
+  const result: Record<string, string> = {};
+
+  for (const row of rows) {
+    const field = pickValue(row, ["Pole", "Informacja", "Dane", "Atrybut"]);
+    const value = pickValue(row, ["Wartość", "Wartosc", "Value"]);
+    if (!field || !value) continue;
+
+    const normalized = field.toLowerCase();
+    if (normalized.includes("nazwa")) result.nazwa = value;
+    if (normalized.includes("krs")) result.krs = value;
+    if (normalized.includes("adres") || normalized.includes("siedzib")) result.adres = value;
+    if (normalized.includes("forma")) result.forma_prawna = value;
+    if (normalized.includes("kapita")) result.kapital_zakladowy = value;
+    if (normalized.includes("rejestr")) result.data_rejestracji = value;
+    if (normalized.includes("dzialal") || normalized.includes("pkd")) result.glowna_dzialalnosc = value;
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
 }
 
 function parseDigitalPresenceRows(markdown: string): DigitalPresenceRow[] {

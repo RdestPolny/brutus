@@ -52,7 +52,7 @@ export default function Home() {
               <input
                 id="nip"
                 inputMode="numeric"
-                pattern="[0-9 -]*"
+                maxLength={13}
                 value={nip}
                 onChange={(event) => setNip(event.target.value)}
                 placeholder="np. 8971837029"
