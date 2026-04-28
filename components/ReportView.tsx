@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import type { CompanyReport } from "@/lib/types";
 
 export function ReportView({ report }: { report: CompanyReport }) {
+  const [debugOpen, setDebugOpen] = useState(false);
   const registry = report.registry.rows[0];
   const place = report.googlePlace;
 
@@ -16,13 +18,22 @@ export function ReportView({ report }: { report: CompanyReport }) {
             Wygenerowano: {new Date(report.generatedAt).toLocaleString("pl-PL")}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 print:hidden"
-        >
-          Drukuj
-        </button>
+        <div className="flex gap-2 print:hidden">
+          <button
+            type="button"
+            onClick={() => setDebugOpen(true)}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Debug
+          </button>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Drukuj
+          </button>
+        </div>
       </div>
 
       <Section title="1. Dane rejestrowe">
@@ -83,6 +94,8 @@ export function ReportView({ report }: { report: CompanyReport }) {
           Zapytanie Google Places: {[registry.name, registry.address].filter(Boolean).join(" ")}
         </p>
       )}
+
+      {debugOpen && <DebugModal report={report} onClose={() => setDebugOpen(false)} />}
     </div>
   );
 }
@@ -213,4 +226,75 @@ function renderMaybeLink(value: string) {
 function formatRating(rating: number | null, count: number | null): string | null {
   if (rating === null) return null;
   return `${rating}/5${count !== null ? ` (${count} opinii)` : ""}`;
+}
+
+function DebugModal({ report, onClose }: { report: CompanyReport; onClose: () => void }) {
+  const debug = report.debug;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 print:hidden">
+      <div className="flex max-h-[90vh] w-full max-w-5xl flex-col rounded-lg bg-white shadow-xl">
+        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
+          <div>
+            <h3 className="text-base font-semibold text-gray-950">Debug API</h3>
+            <p className="text-xs text-gray-500">Surowe zapytania i odpowiedzi z ostatniego raportu</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Zamknij
+          </button>
+        </div>
+
+        <div className="overflow-auto p-5">
+          {!debug ? (
+            <Empty />
+          ) : (
+            <div className="space-y-4">
+              {debug.steps?.map((step, index) => (
+                <details key={`${step.name}-${index}`} open={index === 0} className="rounded-md border border-gray-200">
+                  <summary className="cursor-pointer bg-gray-50 px-4 py-3 text-sm font-medium text-gray-900">
+                    {step.name}
+                  </summary>
+                  <div className="grid gap-4 p-4 md:grid-cols-2">
+                    <DebugBlock title="Request" value={step.request} />
+                    <DebugBlock title="Response" value={step.response} />
+                  </div>
+                </details>
+              ))}
+
+              <details className="rounded-md border border-gray-200">
+                <summary className="cursor-pointer bg-gray-50 px-4 py-3 text-sm font-medium text-gray-900">
+                  Sparsowane dane w raporcie
+                </summary>
+                <div className="p-4">
+                  <DebugBlock
+                    title="Parsed report"
+                    value={{
+                      registry: report.registry,
+                      digitalPresence: report.digitalPresence,
+                      googlePlace: report.googlePlace,
+                    }}
+                  />
+                </div>
+              </details>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DebugBlock({ title, value }: { title: string; value: unknown }) {
+  return (
+    <div>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</p>
+      <pre className="max-h-96 overflow-auto rounded-md border border-gray-200 bg-gray-950 p-3 text-xs leading-5 text-gray-100 whitespace-pre-wrap">
+        {typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+      </pre>
+    </div>
+  );
 }

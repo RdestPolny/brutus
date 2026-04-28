@@ -35,6 +35,12 @@ export interface GooglePlaceReport {
   }>;
 }
 
+export interface ApiDebugStep {
+  name: string;
+  request: unknown;
+  response: unknown;
+}
+
 export interface CompanyReport {
   input: ReportInput;
   generatedAt: string;
@@ -49,7 +55,13 @@ export interface CompanyReport {
   googlePlace: GooglePlaceReport;
   debug?: {
     registryPrompt: string;
+    registryResponse: string;
+    registryRawResponse: unknown;
     digitalPresencePrompt: string;
+    digitalPresenceResponse: string;
+    digitalPresenceRawResponse: unknown;
     placesQuery: string;
+    placesRawResponse: unknown;
+    steps: ApiDebugStep[];
   };
 }

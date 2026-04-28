@@ -2,8 +2,27 @@ const PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions";
 const MODEL = "sonar-pro";
 
 export async function askPerplexityTable(prompt: string): Promise<string> {
+  const result = await askPerplexityTableWithDebug(prompt);
+  return result.content;
+}
+
+export async function askPerplexityTableWithDebug(
+  prompt: string
+): Promise<{ content: string; request: unknown; response: unknown }> {
   const apiKey = process.env.PERPLEXITY_API_KEY;
   if (!apiKey) throw new Error("PERPLEXITY_API_KEY not set");
+
+  const request = {
+    model: MODEL,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Odpowiadasz wyłącznie tabelą Markdown. Bez wstępu, komentarzy, podsumowań i tekstu poza tabelą. Jeśli nie znajdziesz wartości, wpisz 'nie znaleziono'.",
+      },
+      { role: "user", content: prompt },
+    ],
+  };
 
   const res = await fetch(PERPLEXITY_API_URL, {
     method: "POST",
@@ -11,27 +30,38 @@ export async function askPerplexityTable(prompt: string): Promise<string> {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Odpowiadasz wyłącznie tabelą Markdown. Bez wstępu, komentarzy, podsumowań i tekstu poza tabelą. Jeśli nie znajdziesz wartości, wpisz 'nie znaleziono'.",
-        },
-        { role: "user", content: prompt },
-      ],
-    }),
+    body: JSON.stringify(request),
     signal: AbortSignal.timeout(60000),
   });
 
+  const rawText = await res.text();
+  const data = parseJsonOrRawText(rawText);
+
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Perplexity error ${res.status}: ${err}`);
+    throw new Error(`Perplexity error ${res.status}: ${JSON.stringify(data)}`);
   }
 
-  const data = await res.json();
-  return String(data?.choices?.[0]?.message?.content ?? "").trim();
+  return {
+    content: String((data as PerplexityResponse)?.choices?.[0]?.message?.content ?? "").trim(),
+    request,
+    response: data,
+  };
+}
+
+interface PerplexityResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}
+
+function parseJsonOrRawText(rawText: string): unknown {
+  try {
+    return JSON.parse(rawText);
+  } catch {
+    return { rawText };
+  }
 }
 
 export function buildRegistryPrompt(nip: string): string {

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  askPerplexityTable,
+  askPerplexityTableWithDebug,
   buildDigitalPresencePrompt,
   buildRegistryPrompt,
 } from "@/lib/perplexity";
 import { parseMarkdownTable, pickValue } from "@/lib/markdownTable";
-import { fetchGooglePlaceReport } from "@/lib/places";
+import { fetchGooglePlaceReportWithDebug } from "@/lib/places";
 import type { CompanyRegistryRow, DigitalPresenceRow } from "@/lib/types";
 
 export const maxDuration = 90;
@@ -26,7 +26,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const registryPrompt = buildRegistryPrompt(nip);
-    const registryMarkdown = await askPerplexityTable(registryPrompt);
+    const registryResult = await askPerplexityTableWithDebug(registryPrompt);
+    const registryMarkdown = registryResult.content;
     const registryRows = parseRegistryRows(registryMarkdown);
     const firstRegistryRow = registryRows[0];
 
@@ -35,13 +36,14 @@ export async function POST(req: NextRequest) {
     }
 
     const digitalPresencePrompt = buildDigitalPresencePrompt(firstRegistryRow.name);
-    const digitalPresenceMarkdown = await askPerplexityTable(digitalPresencePrompt);
+    const digitalPresenceResult = await askPerplexityTableWithDebug(digitalPresencePrompt);
+    const digitalPresenceMarkdown = digitalPresenceResult.content;
     const digitalPresenceRows = parseDigitalPresenceRows(digitalPresenceMarkdown);
 
     const placesQuery = [firstRegistryRow.name, firstRegistryRow.address]
       .filter(Boolean)
       .join(" ");
-    const googlePlace = await fetchGooglePlaceReport(placesQuery);
+    const googlePlaceResult = await fetchGooglePlaceReportWithDebug(placesQuery);
 
     return NextResponse.json({
       input: { nip },
@@ -54,11 +56,33 @@ export async function POST(req: NextRequest) {
         rawMarkdown: digitalPresenceMarkdown,
         rows: digitalPresenceRows,
       },
-      googlePlace,
+      googlePlace: googlePlaceResult.report,
       debug: {
         registryPrompt,
+        registryResponse: registryMarkdown,
+        registryRawResponse: registryResult.response,
         digitalPresencePrompt,
+        digitalPresenceResponse: digitalPresenceMarkdown,
+        digitalPresenceRawResponse: digitalPresenceResult.response,
         placesQuery,
+        placesRawResponse: googlePlaceResult.response,
+        steps: [
+          {
+            name: "Perplexity: dane rejestrowe",
+            request: registryResult.request,
+            response: registryResult.response,
+          },
+          {
+            name: "Perplexity: strona i social media",
+            request: digitalPresenceResult.request,
+            response: digitalPresenceResult.response,
+          },
+          {
+            name: "Google Places: searchText",
+            request: googlePlaceResult.request,
+            response: googlePlaceResult.response,
+          },
+        ],
       },
     });
   } catch (err) {
