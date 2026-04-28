@@ -60,6 +60,7 @@ export interface CompanyReport {
     digitalPresencePrompt: string;
     digitalPresenceResponse: string;
     digitalPresenceRawResponse: unknown;
+    websitePresenceRawResponse: unknown;
     placesQuery: string;
     placesRawResponse: unknown;
     officialWebsite: string | null;
