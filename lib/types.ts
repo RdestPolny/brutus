@@ -64,6 +64,7 @@ export interface CompanyReport {
     placesQuery: string;
     placesRawResponse: unknown;
     officialWebsite: string | null;
+    resolvedWebsite: string | null;
     steps: ApiDebugStep[];
   };
 }

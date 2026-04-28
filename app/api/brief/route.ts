@@ -44,9 +44,11 @@ export async function POST(req: NextRequest) {
     });
     const digitalPresenceResult = await askPerplexityTableWithDebug(digitalPresencePrompt);
     const digitalPresenceMarkdown = digitalPresenceResult.content;
-    const websitePresenceResult = await fetchWebsiteDigitalPresence(officialWebsite);
+    const perplexityDigitalRows = parseDigitalPresenceRows(digitalPresenceMarkdown);
+    const resolvedWebsite = officialWebsite ?? extractWebsiteFromDigitalRows(perplexityDigitalRows);
+    const websitePresenceResult = await fetchWebsiteDigitalPresence(resolvedWebsite);
     const digitalPresenceRows = mergeDigitalPresenceRows(
-      parseDigitalPresenceRows(digitalPresenceMarkdown),
+      perplexityDigitalRows,
       websitePresenceResult.rows
     );
 
@@ -78,6 +80,7 @@ export async function POST(req: NextRequest) {
         placesQuery,
         placesRawResponse: googlePlaceResult.response,
         officialWebsite,
+        resolvedWebsite,
         steps: [
           {
             name: "Perplexity: dane rejestrowe",
@@ -91,7 +94,7 @@ export async function POST(req: NextRequest) {
           },
           {
             name: "Website fallback: linki ze strony firmowej",
-            request: { officialWebsite },
+            request: { officialWebsite, resolvedWebsite },
             response: websitePresenceResult.debug,
           },
           {
@@ -134,10 +137,16 @@ function extractOfficialWebsite(response: unknown, companyName: string): string 
     "rejestr.io",
     "krs-pobierz.pl",
     "bizraport.pl",
+    "monitorfirm.pb.pl",
+    "imsig.pl",
+    "pstm.org.pl",
+    "rocketjobs.pl",
     "panoramafirm.pl",
     "pkt.pl",
     "regon.info",
     "owg.pl",
+    "dnb.com",
+    "kompass.com",
   ];
   const brandTokens = brandTokensFromCompanyName(companyName);
   let best: { url: string; score: number } | null = null;
@@ -150,11 +159,14 @@ function extractOfficialWebsite(response: unknown, companyName: string): string 
         continue;
       }
       if (host.includes("facebook.com") || host.includes("linkedin.com")) continue;
-      const searchable = `${host} ${candidate.text}`.toLowerCase();
-      const score = brandTokens.reduce(
-        (sum, token) => sum + (searchable.includes(token) ? 2 : 0),
-        host.endsWith(".pl") ? 1 : 0
-      );
+      const hostWithoutTld = host.split(".").slice(0, -1).join(".");
+      const searchable = `${host} ${url.pathname} ${candidate.text}`.toLowerCase();
+      const score = brandTokens.reduce((sum, token) => {
+        const tokenRoot = token.split(".")[0];
+        const hostMatch = hostWithoutTld.includes(tokenRoot) ? 5 : 0;
+        const contentMatch = searchable.includes(tokenRoot) ? 1 : 0;
+        return sum + hostMatch + contentMatch;
+      }, host.endsWith(".pl") ? 1 : 0);
       const normalizedUrl = `${url.protocol}//${host}`;
       if (!best || score > best.score) best = { url: normalizedUrl, score };
     } catch {
@@ -162,7 +174,7 @@ function extractOfficialWebsite(response: unknown, companyName: string): string 
     }
   }
 
-  return best?.url ?? null;
+  return best && best.score >= 5 ? best.url : null;
 }
 
 function inferDomainFromCompanyName(companyName: string): string | null {
@@ -177,6 +189,26 @@ function brandTokensFromCompanyName(companyName: string): string[] {
     .split(/[^a-z0-9ąćęłńóśźż.]+/i)
     .map((part) => part.trim())
     .filter((part) => part.length >= 3);
+}
+
+function extractWebsiteFromDigitalRows(rows: DigitalPresenceRow[]): string | null {
+  for (const row of rows) {
+    const platform = row.platform.toLowerCase();
+    if (!platform.includes("strona") && !platform.includes("www") && !platform.includes("website")) {
+      continue;
+    }
+
+    const urlMatch = row.address.match(/https?:\/\/[^\s)\]]+/);
+    if (!urlMatch) continue;
+    try {
+      const url = new URL(urlMatch[0]);
+      return `${url.protocol}//${url.hostname.replace(/^www\./, "")}`;
+    } catch {
+      // Ignore malformed URLs from model output.
+    }
+  }
+
+  return null;
 }
 
 function parseRegistryRows(markdown: string): CompanyRegistryRow[] {
