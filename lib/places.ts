@@ -1,6 +1,8 @@
 import type { GooglePlaceReport } from "./types";
 
 const PLACES_API_URL = "https://places.googleapis.com/v1/places:searchText";
+const LEGACY_TEXT_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json";
+const LEGACY_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json";
 const FIELD_MASK = [
   "places.displayName",
   "places.formattedAddress",
@@ -38,6 +40,30 @@ export async function fetchGooglePlaceReportWithDebug(
     };
   }
 
+  const newPlacesLookup = await fetchNewPlaces(query, apiKey, request);
+  if (newPlacesLookup.report.name || newPlacesLookup.report.mapsUrl || !isNewPlacesDisabled(newPlacesLookup.response)) {
+    return newPlacesLookup;
+  }
+
+  const legacyLookup = await fetchLegacyPlaces(query, apiKey);
+  return {
+    report: legacyLookup.report,
+    request: {
+      primary: request,
+      fallback: legacyLookup.request,
+    },
+    response: {
+      primary: newPlacesLookup.response,
+      fallback: legacyLookup.response,
+    },
+  };
+}
+
+async function fetchNewPlaces(
+  query: string,
+  apiKey: string,
+  request: NewPlacesRequest
+): Promise<{ report: GooglePlaceReport; request: unknown; response: unknown }> {
   const res = await fetch(PLACES_API_URL, {
     method: "POST",
     headers: {
@@ -86,6 +112,102 @@ export async function fetchGooglePlaceReportWithDebug(
   };
 }
 
+async function fetchLegacyPlaces(
+  query: string,
+  apiKey: string
+): Promise<{ report: GooglePlaceReport; request: unknown; response: unknown }> {
+  const textSearchUrl = new URL(LEGACY_TEXT_SEARCH_URL);
+  textSearchUrl.search = new URLSearchParams({
+    query,
+    language: "pl",
+    key: apiKey,
+  }).toString();
+
+  const textSearchRes = await fetch(textSearchUrl, { signal: AbortSignal.timeout(15000) });
+  const textSearchRaw = await textSearchRes.text();
+  const textSearchData = parseJsonOrRawText(textSearchRaw) as LegacyTextSearchResponse;
+  const textSearchResponse = {
+    status: textSearchRes.status,
+    ok: textSearchRes.ok,
+    body: textSearchData,
+  };
+  const placeId = textSearchData?.results?.[0]?.place_id;
+
+  if (!textSearchRes.ok || !placeId) {
+    return {
+      report: emptyGooglePlaceReport(),
+      request: { textSearch: redactKey(textSearchUrl.toString()) },
+      response: { textSearch: textSearchResponse },
+    };
+  }
+
+  const detailsUrl = new URL(LEGACY_DETAILS_URL);
+  detailsUrl.search = new URLSearchParams({
+    place_id: placeId,
+    language: "pl",
+    fields:
+      "name,formatted_address,url,rating,user_ratings_total,website,formatted_phone_number,business_status,opening_hours,reviews",
+    key: apiKey,
+  }).toString();
+
+  const detailsRes = await fetch(detailsUrl, { signal: AbortSignal.timeout(15000) });
+  const detailsRaw = await detailsRes.text();
+  const detailsData = parseJsonOrRawText(detailsRaw) as LegacyDetailsResponse;
+  const detailsResponse = {
+    status: detailsRes.status,
+    ok: detailsRes.ok,
+    body: detailsData,
+  };
+  const place = detailsData?.result;
+
+  if (!detailsRes.ok || !place) {
+    return {
+      report: emptyGooglePlaceReport(),
+      request: {
+        textSearch: redactKey(textSearchUrl.toString()),
+        details: redactKey(detailsUrl.toString()),
+      },
+      response: { textSearch: textSearchResponse, details: detailsResponse },
+    };
+  }
+
+  return {
+    report: {
+      name: place.name ?? null,
+      mapsUrl: place.url ?? null,
+      address: place.formatted_address ?? null,
+      rating: place.rating ?? null,
+      reviewCount: place.user_ratings_total ?? null,
+      websiteUri: place.website ?? null,
+      nationalPhoneNumber: place.formatted_phone_number ?? null,
+      businessStatus: place.business_status ?? null,
+      openingHours: place.opening_hours?.weekday_text ?? [],
+      reviews: (place.reviews ?? []).slice(0, 3).map((review) => ({
+        author: review.author_name ?? null,
+        rating: review.rating ?? null,
+        text: review.text ?? "",
+      })),
+    },
+    request: {
+      textSearch: redactKey(textSearchUrl.toString()),
+      details: redactKey(detailsUrl.toString()),
+    },
+    response: {
+      textSearch: textSearchResponse,
+      details: detailsResponse,
+    },
+  };
+}
+
+function isNewPlacesDisabled(response: unknown): boolean {
+  const body = (response as { body?: { error?: { details?: Array<{ reason?: string }> } } })?.body;
+  return body?.error?.details?.some((detail) => detail.reason === "SERVICE_DISABLED") ?? false;
+}
+
+function redactKey(url: string): string {
+  return url.replace(/([?&]key=)[^&]+/, "$1[redacted]");
+}
+
 function emptyGooglePlaceReport(): GooglePlaceReport {
   return {
     name: null,
@@ -126,4 +248,39 @@ interface PlacesSearchResponse {
       text?: { text?: string };
     }>;
   }>;
+}
+
+interface NewPlacesRequest {
+  url: string;
+  method: string;
+  fieldMask: string;
+  body: {
+    textQuery: string;
+    languageCode: string;
+  };
+}
+
+interface LegacyTextSearchResponse {
+  results?: Array<{
+    place_id?: string;
+  }>;
+}
+
+interface LegacyDetailsResponse {
+  result?: {
+    name?: string;
+    formatted_address?: string;
+    url?: string;
+    rating?: number;
+    user_ratings_total?: number;
+    website?: string;
+    formatted_phone_number?: string;
+    business_status?: string;
+    opening_hours?: { weekday_text?: string[] };
+    reviews?: Array<{
+      author_name?: string;
+      rating?: number;
+      text?: string;
+    }>;
+  };
 }

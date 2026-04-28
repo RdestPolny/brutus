@@ -14,6 +14,7 @@ export async function askPerplexityTableWithDebug(
 
   const request = {
     model: MODEL,
+    web_search_options: { search_context_size: "high" },
     messages: [
       {
         role: "system",
@@ -69,11 +70,77 @@ export function buildRegistryPrompt(nip: string): string {
 Tabela musi mieć dokładnie kolumny: Nazwa | KRS | Adres | Forma prawna | Kapitał zakładowy | Data rejestracji | Główna działalność.`;
 }
 
-export function buildDigitalPresencePrompt(companyName: string): string {
-  return `${companyName} - poszukaj strony internetowej i linków do social mediów tej firmy, przygotuj tabelę z kolumnami: Platforma, Adres, Liczba followersów / Dodatkowe informacje.
-Platforma to będzie np.
-Strona/Wordpress, [https://strategiczni.pl/](https://strategiczni.pl/)
-lub np.
-Facebook, [https://www.facebook.com/agencjaseosemstrategiczni/](https://www.facebook.com/agencjaseosemstrategiczni/), 500 followersów
-tylko tabela jako output bez dodatkowego komentarza`;
+export function buildDigitalPresencePrompt(
+  companyName: string,
+  context?: { officialWebsite?: string | null; nip?: string; krs?: string }
+): string {
+  const brandName = deriveBrandName(companyName, context?.officialWebsite);
+  const websiteLine = context?.officialWebsite
+    ? `Oficjalna strona ustalona w pierwszym kroku: ${context.officialWebsite}.`
+    : "Jeśli znajdziesz oficjalną stronę, użyj jej jako punktu odniesienia.";
+  const registryLine = [
+    context?.nip && `NIP: ${context.nip}`,
+    context?.krs && `KRS: ${context.krs}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return `${companyName} (${brandName}) - poszukaj strony internetowej i linków do social mediów tej firmy.
+${websiteLine}
+${registryLine ? `${registryLine}.` : ""}
+
+Wykonaj osobne wyszukiwania dla wariantów nazwy: "${companyName}", "${brandName}" oraz domeny z oficjalnej strony.
+Nie ograniczaj się do wyników z oficjalnej strony. Sprawdź zewnętrzne platformy, szczególnie:
+- site:facebook.com "${brandName}"
+- site:instagram.com "${brandName}"
+- site:linkedin.com/company "${brandName}"
+- site:youtube.com "${brandName}"
+- site:tiktok.com "${brandName}"
+- site:x.com OR site:twitter.com "${brandName}"
+
+Przygotuj tabelę Markdown z kolumnami dokładnie:
+Platforma | Adres | Liczba followersów / Dodatkowe informacje
+
+Zasady:
+- W kolumnie Adres podawaj pełny URL, jeśli został znaleziony.
+- Dla strony internetowej podaj oficjalny URL.
+- Dla social mediów podaj tylko profile tej konkretnej firmy, nie artykuły i nie prywatne profile pracowników.
+- Jeśli liczba followersów nie jest dostępna, wpisz "nie znaleziono".
+- Jeśli platformy nie znajdziesz, możesz ją pominąć zamiast dodawać pusty wiersz.
+- Zwróć tylko tabelę, bez dodatkowego komentarza.`;
+}
+
+function deriveBrandName(companyName: string, officialWebsite?: string | null): string {
+  if (officialWebsite) {
+    try {
+      const host = new URL(officialWebsite).hostname.replace(/^www\./, "");
+      const base = host.split(".").slice(0, -1).join(".");
+      if (base) return titleCaseBrand(base);
+    } catch {
+      // Fall back to company name cleanup.
+    }
+  }
+
+  const cleaned = companyName
+    .replace(/spółka z ograniczoną odpowiedzialnością/gi, "")
+    .replace(/sp\.?\s*z\s*o\.?o\.?/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return titleCaseBrand(cleaned || companyName);
+}
+
+function titleCaseBrand(value: string): string {
+  return value
+    .split(/(\s+|-)/)
+    .map((part) => {
+      if (/^\s+$|^-$/.test(part)) return part;
+      if (part.includes(".")) {
+        return part
+          .split(".")
+          .map((token) => token.charAt(0).toUpperCase() + token.slice(1).toLowerCase())
+          .join(".");
+      }
+      return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+    })
+    .join("");
 }

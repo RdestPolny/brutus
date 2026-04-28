@@ -35,7 +35,12 @@ export async function POST(req: NextRequest) {
       throw new Error("Nie udało się odczytać nazwy firmy z pierwszej tabeli Perplexity");
     }
 
-    const digitalPresencePrompt = buildDigitalPresencePrompt(firstRegistryRow.name);
+    const officialWebsite = extractOfficialWebsite(registryResult.response);
+    const digitalPresencePrompt = buildDigitalPresencePrompt(firstRegistryRow.name, {
+      officialWebsite,
+      nip,
+      krs: firstRegistryRow.krs,
+    });
     const digitalPresenceResult = await askPerplexityTableWithDebug(digitalPresencePrompt);
     const digitalPresenceMarkdown = digitalPresenceResult.content;
     const digitalPresenceRows = parseDigitalPresenceRows(digitalPresenceMarkdown);
@@ -66,6 +71,7 @@ export async function POST(req: NextRequest) {
         digitalPresenceRawResponse: digitalPresenceResult.response,
         placesQuery,
         placesRawResponse: googlePlaceResult.response,
+        officialWebsite,
         steps: [
           {
             name: "Perplexity: dane rejestrowe",
@@ -90,6 +96,44 @@ export async function POST(req: NextRequest) {
     console.error("[brief] error:", err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+function extractOfficialWebsite(response: unknown): string | null {
+  const raw = response as {
+    citations?: string[];
+    search_results?: Array<{ url?: string }>;
+  };
+  const urls = [
+    ...(raw.citations ?? []),
+    ...(raw.search_results ?? []).map((result) => result.url).filter(Boolean),
+  ] as string[];
+
+  const directoryDomains = [
+    "krs-online.com.pl",
+    "oferteo.pl",
+    "analizafirm.pl",
+    "aleo.com",
+    "rejestr.io",
+    "bizraport.pl",
+    "panoramafirm.pl",
+    "pkt.pl",
+  ];
+
+  for (const rawUrl of urls) {
+    try {
+      const url = new URL(rawUrl);
+      const host = url.hostname.replace(/^www\./, "");
+      if (directoryDomains.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
+        continue;
+      }
+      if (host.includes("facebook.com") || host.includes("linkedin.com")) continue;
+      return `${url.protocol}//${host}`;
+    } catch {
+      // Ignore malformed URLs from API metadata.
+    }
+  }
+
+  return null;
 }
 
 function parseRegistryRows(markdown: string): CompanyRegistryRow[] {

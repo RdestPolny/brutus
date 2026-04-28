@@ -62,6 +62,7 @@ export interface CompanyReport {
     digitalPresenceRawResponse: unknown;
     placesQuery: string;
     placesRawResponse: unknown;
+    officialWebsite: string | null;
     steps: ApiDebugStep[];
   };
 }

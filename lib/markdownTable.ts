@@ -52,6 +52,7 @@ function isSeparatorRow(line: string): boolean {
 function cleanCell(value: string): string {
   return value
     .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/\[\d+(?:,\s*\d+)*\]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
