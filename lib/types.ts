@@ -33,6 +33,16 @@ export interface GooglePlaceReport {
     rating: number | null;
     text: string;
   }>;
+  positiveReviews: Array<{
+    author: string | null;
+    rating: number | null;
+    text: string;
+  }>;
+  negativeReviews: Array<{
+    author: string | null;
+    rating: number | null;
+    text: string;
+  }>;
 }
 
 export interface ApiDebugStep {

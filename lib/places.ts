@@ -1,5 +1,7 @@
 import type { GooglePlaceReport } from "./types";
 
+type PlaceReview = GooglePlaceReport["reviews"][number];
+
 const PLACES_API_URL = "https://places.googleapis.com/v1/places:searchText";
 const LEGACY_TEXT_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json";
 const LEGACY_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json";
@@ -95,16 +97,18 @@ async function fetchNewPlaces(
       nationalPhoneNumber: place.nationalPhoneNumber ?? null,
       businessStatus: place.businessStatus ?? null,
       openingHours: place.regularOpeningHours?.weekdayDescriptions ?? [],
-      reviews: (place.reviews ?? []).slice(0, 3).map(
-        (review: {
-          authorAttribution?: { displayName?: string };
-          rating?: number;
-          text?: { text?: string };
-        }) => ({
-          author: review.authorAttribution?.displayName ?? null,
-          rating: review.rating ?? null,
-          text: review.text?.text ?? "",
-        })
+      ...splitReviews(
+        (place.reviews ?? []).map(
+          (review: {
+            authorAttribution?: { displayName?: string };
+            rating?: number;
+            text?: { text?: string };
+          }) => ({
+            author: review.authorAttribution?.displayName ?? null,
+            rating: review.rating ?? null,
+            text: review.text?.text ?? "",
+          })
+        )
       ),
     },
     request,
@@ -182,11 +186,13 @@ async function fetchLegacyPlaces(
       nationalPhoneNumber: place.formatted_phone_number ?? null,
       businessStatus: place.business_status ?? null,
       openingHours: place.opening_hours?.weekday_text ?? [],
-      reviews: (place.reviews ?? []).slice(0, 3).map((review) => ({
-        author: review.author_name ?? null,
-        rating: review.rating ?? null,
-        text: review.text ?? "",
-      })),
+      ...splitReviews(
+        (place.reviews ?? []).map((review) => ({
+          author: review.author_name ?? null,
+          rating: review.rating ?? null,
+          text: review.text ?? "",
+        }))
+      ),
     },
     request: {
       textSearch: redactKey(textSearchUrl.toString()),
@@ -220,6 +226,21 @@ function emptyGooglePlaceReport(): GooglePlaceReport {
     businessStatus: null,
     openingHours: [],
     reviews: [],
+    positiveReviews: [],
+    negativeReviews: [],
+  };
+}
+
+function splitReviews(reviews: PlaceReview[]): Pick<GooglePlaceReport, "reviews" | "positiveReviews" | "negativeReviews"> {
+  return {
+    reviews: reviews.slice(0, 3),
+    positiveReviews: reviews.filter((review) => (review.rating ?? 0) >= 4).slice(0, 5),
+    negativeReviews: reviews
+      .filter((review) => {
+        const rating = review.rating ?? 0;
+        return rating >= 1 && rating <= 3;
+      })
+      .slice(0, 5),
   };
 }
 

@@ -105,7 +105,9 @@ Zasady:
 - W kolumnie Adres podawaj pełny URL, jeśli został znaleziony.
 - Dla strony internetowej podaj oficjalny URL.
 - Dla social mediów podaj tylko profile tej konkretnej firmy, nie artykuły i nie prywatne profile pracowników.
-- Jeśli liczba followersów nie jest dostępna, wpisz "nie znaleziono".
+- Dla każdego znalezionego profilu social media spróbuj ustalić publicznie widoczną liczbę followersów / obserwujących / polubień / subskrybentów. Wpisz ją w kolumnie "Liczba followersów / Dodatkowe informacje" razem ze źródłem lub krótką informacją, np. "ok. 500 followersów", "1,2 tys. obserwujących", "liczba followersów niewidoczna".
+- Jeśli profil jest znaleziony, nie wpisuj w tej kolumnie samego "nie znaleziono"; wpisz przynajmniej "profil znaleziony, liczba followersów niewidoczna".
+- Jeśli liczba followersów nie jest publicznie dostępna, wpisz "profil znaleziony, liczba followersów niewidoczna".
 - Jeśli platformy nie znajdziesz, możesz ją pominąć zamiast dodawać pusty wiersz.
 - Zwróć tylko tabelę, bez dodatkowego komentarza.`;
 }

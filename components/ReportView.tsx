@@ -70,22 +70,10 @@ export function ReportView({ report }: { report: CompanyReport }) {
         </div>
 
         <div className="mt-5">
-          <p className="mb-2 text-sm font-medium text-gray-700">Ostatnie opinie</p>
-          {place.reviews.length > 0 ? (
-            <div className="space-y-3">
-              {place.reviews.map((review, index) => (
-                <div key={index} className="rounded-md border border-gray-200 bg-gray-50 p-3">
-                  <div className="mb-1 flex items-center justify-between gap-3 text-sm">
-                    <span className="font-medium text-gray-800">{review.author ?? "Autor Google"}</span>
-                    <span className="text-gray-500">{review.rating ? `${review.rating}/5` : "brak oceny"}</span>
-                  </div>
-                  <p className="text-sm leading-6 text-gray-700">{review.text || "Brak treści opinii"}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Empty />
-          )}
+          <div className="grid gap-5 lg:grid-cols-2">
+            <ReviewsList title="Pozytywne opinie" reviews={place.positiveReviews} tone="positive" />
+            <ReviewsList title="Negatywne opinie (1-3 gwiazdki)" reviews={place.negativeReviews} tone="negative" />
+          </div>
         </div>
       </Section>
 
@@ -226,6 +214,38 @@ function renderMaybeLink(value: string) {
 function formatRating(rating: number | null, count: number | null): string | null {
   if (rating === null) return null;
   return `${rating}/5${count !== null ? ` (${count} opinii)` : ""}`;
+}
+
+function ReviewsList({
+  title,
+  reviews,
+  tone,
+}: {
+  title: string;
+  reviews: Array<{ author: string | null; rating: number | null; text: string }>;
+  tone: "positive" | "negative";
+}) {
+  const color = tone === "positive" ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50";
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium text-gray-700">{title}</p>
+      {reviews.length > 0 ? (
+        <div className="space-y-3">
+          {reviews.map((review, index) => (
+            <div key={index} className={`rounded-md border p-3 ${color}`}>
+              <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                <span className="font-medium text-gray-800">{review.author ?? "Autor Google"}</span>
+                <span className="text-gray-500">{review.rating ? `${review.rating}/5` : "brak oceny"}</span>
+              </div>
+              <p className="text-sm leading-6 text-gray-700">{review.text || "Brak treści opinii"}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Empty />
+      )}
+    </div>
+  );
 }
 
 function DebugModal({ report, onClose }: { report: CompanyReport; onClose: () => void }) {
