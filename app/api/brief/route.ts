@@ -42,8 +42,6 @@ export async function POST(req: NextRequest) {
     }
 
     const officialWebsite = extractOfficialWebsite(registryResult.response, firstRegistryRow.name);
-    const websiteFactsResult = await extractWebsiteFactsWithDebug(officialWebsite);
-
     const websiteFactsPerplexityPrompt = buildWebsiteFactsPerplexityPrompt(firstRegistryRow, {
       nip,
       officialWebsite,
@@ -51,16 +49,19 @@ export async function POST(req: NextRequest) {
     const websiteFactsPerplexityResult = await askPerplexityTableWithDebug(websiteFactsPerplexityPrompt);
     const websiteFactsPerplexityMarkdown = websiteFactsPerplexityResult.content;
     const perplexityFactsRows = parsePerplexityFactRows(websiteFactsPerplexityMarkdown);
+    const websiteFromPerplexityFacts = extractWebsiteFromFactRows(perplexityFactsRows, firstRegistryRow.name);
 
     const digitalPresencePrompt = buildDigitalPresencePrompt(firstRegistryRow.name, {
-      officialWebsite,
+      officialWebsite: officialWebsite ?? websiteFromPerplexityFacts,
       nip,
       krs: firstRegistryRow.krs,
     });
     const digitalPresenceResult = await askPerplexityTableWithDebug(digitalPresencePrompt);
     const digitalPresenceMarkdown = digitalPresenceResult.content;
     const perplexityDigitalRows = parseDigitalPresenceRows(digitalPresenceMarkdown);
-    const resolvedWebsite = officialWebsite ?? extractWebsiteFromDigitalRows(perplexityDigitalRows);
+    const resolvedWebsite =
+      officialWebsite ?? websiteFromPerplexityFacts ?? extractWebsiteFromDigitalRows(perplexityDigitalRows);
+    const websiteFactsResult = await extractWebsiteFactsWithDebug(resolvedWebsite);
     const websitePresenceResult = await fetchWebsiteDigitalPresence(resolvedWebsite);
     const digitalPresenceRows = mergeDigitalPresenceRows(
       perplexityDigitalRows,
@@ -118,17 +119,13 @@ export async function POST(req: NextRequest) {
         placesQuery,
         placesRawResponse: googlePlaceResult.response,
         officialWebsite,
+        websiteFromPerplexityFacts,
         resolvedWebsite,
         steps: [
           {
             name: "Perplexity: dane rejestrowe",
             request: registryResult.request,
             response: registryResult.response,
-          },
-          {
-            name: "Firecrawl + Gemini: fakty z oficjalnej strony",
-            request: websiteFactsResult.debug.scrapeRequest ?? { officialWebsite },
-            response: websiteFactsResult.debug,
           },
           {
             name: "Perplexity: dane firmowe i kontaktowe",
@@ -139,6 +136,11 @@ export async function POST(req: NextRequest) {
             name: "Perplexity: strona i social media",
             request: digitalPresenceResult.request,
             response: digitalPresenceResult.response,
+          },
+          {
+            name: "Firecrawl + Gemini: fakty z oficjalnej strony",
+            request: websiteFactsResult.debug.scrapeRequest ?? { resolvedWebsite },
+            response: websiteFactsResult.debug,
           },
           {
             name: "Gemini: walidacja danych ze strony",
@@ -262,6 +264,99 @@ function extractWebsiteFromDigitalRows(rows: DigitalPresenceRow[]): string | nul
   }
 
   return null;
+}
+
+function extractWebsiteFromFactRows(rows: PerplexityFactRow[], companyName: string): string | null {
+  const websiteRows = rows.filter((row) => {
+    const searchable = `${row.category} ${row.value}`.toLowerCase();
+    return searchable.includes("strona") || searchable.includes("www") || searchable.includes("website");
+  });
+
+  for (const row of [...websiteRows, ...rows]) {
+    const website = extractWebsiteFromText(`${row.value} ${row.source}`, companyName);
+    if (website) return website;
+  }
+
+  return null;
+}
+
+function extractWebsiteFromText(text: string, companyName: string): string | null {
+  const candidates: Array<{ url: string; score: number }> = [];
+  const urlRegex = /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s|,;]*)?/gi;
+  const brandTokens = brandTokensFromCompanyName(companyName);
+  let match: RegExpExecArray | null;
+
+  while ((match = urlRegex.exec(text))) {
+    if (match.index > 0 && text[match.index - 1] === "@") continue;
+
+    const normalized = normalizeWebsiteCandidate(match[0]);
+    if (!normalized) continue;
+
+    try {
+      const url = new URL(normalized);
+      const host = url.hostname.replace(/^www\./, "");
+      const hostWithoutTld = host.split(".").slice(0, -1).join(".");
+      const score = brandTokens.reduce((sum, token) => {
+        const tokenRoot = token.split(".")[0];
+        return sum + (hostWithoutTld.includes(tokenRoot) ? 5 : 0);
+      }, host.endsWith(".pl") ? 2 : 0);
+      candidates.push({ url: `${url.protocol}//${host}`, score });
+    } catch {
+      // Ignore malformed URLs from model output.
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates[0]?.url ?? null;
+}
+
+function normalizeWebsiteCandidate(rawValue: string): string | null {
+  const cleaned = rawValue
+    .trim()
+    .replace(/[.)\]]+$/g, "")
+    .replace(/^http:\/\//i, "https://");
+  const withProtocol = /^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned}`;
+
+  try {
+    const url = new URL(withProtocol);
+    const host = url.hostname.replace(/^www\./, "");
+    if (!host.includes(".")) return null;
+    if (isDirectoryOrSocialDomain(host)) return null;
+    return `${url.protocol}//${host}${url.pathname === "/" ? "" : url.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+function isDirectoryOrSocialDomain(host: string): boolean {
+  const excludedDomains = [
+    "krs-online.com.pl",
+    "oferteo.pl",
+    "analizafirm.pl",
+    "aleo.com",
+    "rejestrkrs.pl",
+    "rejestr.io",
+    "krs-pobierz.pl",
+    "bizraport.pl",
+    "monitorfirm.pb.pl",
+    "imsig.pl",
+    "panoramafirm.pl",
+    "pkt.pl",
+    "regon.info",
+    "owg.pl",
+    "dnb.com",
+    "kompass.com",
+    "facebook.com",
+    "instagram.com",
+    "linkedin.com",
+    "youtube.com",
+    "youtu.be",
+    "tiktok.com",
+    "x.com",
+    "twitter.com",
+  ];
+
+  return excludedDomains.some((domain) => host === domain || host.endsWith(`.${domain}`));
 }
 
 function parseRegistryRows(markdown: string): CompanyRegistryRow[] {
