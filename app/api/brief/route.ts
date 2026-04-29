@@ -2,23 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   askPerplexityTableWithDebug,
   buildDigitalPresencePrompt,
-  buildRegistryPrompt,
 } from "@/lib/perplexity";
 import { parseMarkdownTable, pickValue } from "@/lib/markdownTable";
 import { fetchGooglePlaceReportWithDebug } from "@/lib/places";
 import { fetchWebsiteDigitalPresence, mergeDigitalPresenceRows } from "@/lib/website";
 import { fetchGoWorkReportWithDebug } from "@/lib/gowork";
-import {
-  buildWebsiteFactsPerplexityPrompt,
-  extractWebsiteFactsWithDebug,
-  validateWebsiteFactsWithGemini,
-} from "@/lib/websiteFacts";
-import type { CompanyRegistryRow, DigitalPresenceRow, PerplexityFactRow } from "@/lib/types";
+import { extractWebsiteFactsWithDebug } from "@/lib/websiteFacts";
+import type { CompanyRegistryRow, DigitalPresenceRow, GoWorkReport, PerplexityFactRow } from "@/lib/types";
 
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
-  let body: { nip?: string };
+  let body: { companyName?: string };
 
   try {
     body = await req.json();
@@ -26,42 +21,36 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 });
   }
 
-  const nip = String(body.nip ?? "").replace(/\D/g, "");
-  if (nip.length !== 10) {
-    return NextResponse.json({ error: "NIP musi mieć 10 cyfr" }, { status: 400 });
+  const companyName = String(body.companyName ?? "").trim().replace(/\s+/g, " ");
+  if (companyName.length < 2) {
+    return NextResponse.json({ error: "Podaj nazwę firmy" }, { status: 400 });
   }
 
   try {
-    const registryPrompt = buildRegistryPrompt(nip);
-    const registryResult = await askPerplexityTableWithDebug(registryPrompt);
-    const registryMarkdown = registryResult.content;
-    const registryRows = parseRegistryRows(registryMarkdown);
+    const goWorkSeedCompany = buildSeedCompany(companyName);
+    const goWorkResult = await fetchGoWorkReportWithDebug(goWorkSeedCompany, {});
+    const goWork = {
+      profileUrl: goWorkResult.profileUrl,
+      searchRawMarkdown: goWorkResult.searchRawMarkdown,
+      pages: goWorkResult.pages,
+    };
+
+    const registryRows = buildRegistryRowsFromGoWork(companyName, goWork);
     const firstRegistryRow = registryRows[0];
 
     if (!firstRegistryRow?.name) {
-      throw new Error("Nie udało się odczytać nazwy firmy z pierwszej tabeli Perplexity");
+      throw new Error("Nie udało się odczytać nazwy firmy z GoWork");
     }
 
-    const officialWebsite = extractOfficialWebsite(registryResult.response, firstRegistryRow.name);
-    const websiteFactsPerplexityPrompt = buildWebsiteFactsPerplexityPrompt(firstRegistryRow, {
-      nip,
-      officialWebsite,
-    });
-    const websiteFactsPerplexityResult = await askPerplexityTableWithDebug(websiteFactsPerplexityPrompt);
-    const websiteFactsPerplexityMarkdown = websiteFactsPerplexityResult.content;
-    const perplexityFactsRows = parsePerplexityFactRows(websiteFactsPerplexityMarkdown);
-    const websiteFromPerplexityFacts = extractWebsiteFromFactRows(perplexityFactsRows, firstRegistryRow.name);
-
     const digitalPresencePrompt = buildDigitalPresencePrompt(firstRegistryRow.name, {
-      officialWebsite: officialWebsite ?? websiteFromPerplexityFacts,
-      nip,
-      krs: firstRegistryRow.krs,
+      officialWebsite: extractWebsiteFromGoWork(goWork),
+      nip: firstRegistryRow.nip || undefined,
+      krs: firstRegistryRow.krs || undefined,
     });
     const digitalPresenceResult = await askPerplexityTableWithDebug(digitalPresencePrompt);
     const digitalPresenceMarkdown = digitalPresenceResult.content;
     const perplexityDigitalRows = parseDigitalPresenceRows(digitalPresenceMarkdown);
-    const resolvedWebsite =
-      officialWebsite ?? websiteFromPerplexityFacts ?? extractWebsiteFromDigitalRows(perplexityDigitalRows);
+    const resolvedWebsite = extractWebsiteFromGoWork(goWork) ?? extractWebsiteFromDigitalRows(perplexityDigitalRows);
     const websiteFactsResult = await extractWebsiteFactsWithDebug(resolvedWebsite);
     const websitePresenceResult = await fetchWebsiteDigitalPresence(resolvedWebsite);
     const digitalPresenceRows = mergeDigitalPresenceRows(
@@ -69,27 +58,12 @@ export async function POST(req: NextRequest) {
       websitePresenceResult.rows
     );
 
-    const websiteFactsValidationResult = await validateWebsiteFactsWithGemini(websiteFactsResult, {
-      registryMarkdown,
-      websiteFactsMarkdown: websiteFactsPerplexityMarkdown,
-      digitalPresenceMarkdown,
-    });
     const websiteFacts = {
       url: websiteFactsResult.url,
       textLength: websiteFactsResult.textLength,
       facts: websiteFactsResult.facts,
       summary: websiteFactsResult.summary,
-      validation: websiteFactsValidationResult.validation,
-    };
-
-    const goWorkResult = await fetchGoWorkReportWithDebug(firstRegistryRow, {
-      nip,
-      krs: firstRegistryRow.krs,
-    });
-    const goWork = {
-      profileUrl: goWorkResult.profileUrl,
-      searchRawMarkdown: goWorkResult.searchRawMarkdown,
-      pages: goWorkResult.pages,
+      validation: null,
     };
 
     const placesQuery = [firstRegistryRow.name, firstRegistryRow.address]
@@ -98,10 +72,10 @@ export async function POST(req: NextRequest) {
     const googlePlaceResult = await fetchGooglePlaceReportWithDebug(placesQuery);
 
     return NextResponse.json({
-      input: { nip },
+      input: { companyName, nip: firstRegistryRow.nip || undefined },
       generatedAt: new Date().toISOString(),
       registry: {
-        rawMarkdown: registryMarkdown,
+        rawMarkdown: goWork.searchRawMarkdown,
         rows: registryRows,
       },
       digitalPresence: {
@@ -109,21 +83,14 @@ export async function POST(req: NextRequest) {
         rows: digitalPresenceRows,
       },
       perplexityFacts: {
-        rawMarkdown: websiteFactsPerplexityMarkdown,
-        rows: perplexityFactsRows,
+        rawMarkdown: "",
+        rows: [],
       },
       websiteFacts,
       goWork,
       googlePlace: googlePlaceResult.report,
       debug: {
-        registryPrompt,
-        registryResponse: registryMarkdown,
-        registryRawResponse: registryResult.response,
-        websiteFactsPerplexityPrompt,
-        websiteFactsPerplexityResponse: websiteFactsPerplexityMarkdown,
-        websiteFactsPerplexityRawResponse: websiteFactsPerplexityResult.response,
         websiteFactsRawResponse: websiteFactsResult.debug,
-        websiteFactsValidationRawResponse: websiteFactsValidationResult.debug,
         goWorkRawResponse: goWorkResult.debug,
         digitalPresencePrompt,
         digitalPresenceResponse: digitalPresenceMarkdown,
@@ -131,19 +98,13 @@ export async function POST(req: NextRequest) {
         websitePresenceRawResponse: websitePresenceResult.debug,
         placesQuery,
         placesRawResponse: googlePlaceResult.response,
-        officialWebsite,
-        websiteFromPerplexityFacts,
+        officialWebsite: resolvedWebsite,
         resolvedWebsite,
         steps: [
           {
-            name: "Perplexity: dane rejestrowe",
-            request: registryResult.request,
-            response: registryResult.response,
-          },
-          {
-            name: "Perplexity: dane firmowe i kontaktowe",
-            request: websiteFactsPerplexityResult.request,
-            response: websiteFactsPerplexityResult.response,
+            name: "Firecrawl Search + Firecrawl + Gemini: GoWork",
+            request: goWorkResult.debug.searchRequest,
+            response: goWorkResult.debug,
           },
           {
             name: "Perplexity: strona i social media",
@@ -156,18 +117,8 @@ export async function POST(req: NextRequest) {
             response: websiteFactsResult.debug,
           },
           {
-            name: "Gemini: walidacja danych ze strony",
-            request: websiteFactsValidationResult.debug,
-            response: websiteFacts.validation,
-          },
-          {
-            name: "Firecrawl Search + Firecrawl + Gemini: GoWork",
-            request: goWorkResult.debug.searchRequest,
-            response: goWorkResult.debug,
-          },
-          {
             name: "Website fallback: linki ze strony firmowej",
-            request: { officialWebsite, resolvedWebsite },
+            request: { resolvedWebsite },
             response: websitePresenceResult.debug,
           },
           {
@@ -248,6 +199,81 @@ function extractOfficialWebsite(response: unknown, companyName: string): string 
   }
 
   return best && best.score >= 5 ? best.url : null;
+}
+
+function buildSeedCompany(companyName: string): CompanyRegistryRow {
+  return {
+    name: companyName,
+    nip: "",
+    regon: "",
+    krs: "",
+    address: "",
+    legalForm: "",
+    shareCapital: "",
+    registrationDate: "",
+    mainActivity: "",
+    revenue: "",
+    opinions: "",
+  };
+}
+
+function buildRegistryRowsFromGoWork(companyName: string, goWork: GoWorkReport): CompanyRegistryRow[] {
+  const rows = goWork.pages.flatMap((page) => page.rows);
+  const name = findGoWorkValue(rows, ["nazwa", "firma", "profil"]) || companyName;
+  const nip = findNumericGoWorkValue(rows, ["nip"], /\b\d{10}\b/);
+  const krs = findNumericGoWorkValue(rows, ["krs"], /\b\d{10}\b/);
+  const regon = findNumericGoWorkValue(rows, ["regon"], /\b\d{9,14}\b/);
+
+  return [
+    {
+      name,
+      nip,
+      regon,
+      krs,
+      address: findGoWorkValue(rows, ["adres", "siedziba", "lokalizacja"]),
+      legalForm: findGoWorkValue(rows, ["forma prawna", "typ firmy"]),
+      shareCapital: findGoWorkValue(rows, ["kapitał", "kapital"]),
+      registrationDate: findGoWorkValue(rows, ["data rejestracji", "rozpoczęcie działalności", "rok założenia"]),
+      mainActivity: findGoWorkValue(rows, ["działalność", "opis", "branża", "specjalizacja"]),
+      revenue: findGoWorkValue(rows, ["przychód", "przychody", "revenue", "obrót", "obroty"]),
+      opinions: findGoWorkValue(rows, ["opinie", "ocena", "rating", "liczba opinii"]),
+    },
+  ];
+}
+
+function findGoWorkValue(rows: GoWorkReport["pages"][number]["rows"], patterns: string[]): string {
+  const match = rows.find((row) => {
+    const searchable = `${row.category} ${row.label} ${row.value}`.toLowerCase();
+    return patterns.some((pattern) => searchable.includes(pattern));
+  });
+
+  return match?.value ?? "";
+}
+
+function findNumericGoWorkValue(
+  rows: GoWorkReport["pages"][number]["rows"],
+  labelPatterns: string[],
+  valuePattern: RegExp
+): string {
+  const match = rows.find((row) => {
+    const label = `${row.category} ${row.label}`.toLowerCase();
+    return labelPatterns.some((pattern) => label.includes(pattern));
+  });
+  const rawValue = `${match?.value ?? ""} ${match?.sourceQuote ?? ""}`;
+  return rawValue.match(valuePattern)?.[0] ?? match?.value ?? "";
+}
+
+function extractWebsiteFromGoWork(goWork: GoWorkReport): string | null {
+  for (const row of goWork.pages.flatMap((page) => page.rows)) {
+    const searchable = `${row.label} ${row.value} ${row.sourceQuote}`.toLowerCase();
+    if (!searchable.includes("www") && !searchable.includes("strona") && !searchable.includes("http")) {
+      continue;
+    }
+    const website = extractWebsiteFromText(`${row.value} ${row.sourceQuote}`, "");
+    if (website) return website;
+  }
+
+  return null;
 }
 
 function inferDomainFromCompanyName(companyName: string): string | null {
@@ -384,12 +410,16 @@ function parseRegistryRows(markdown: string): CompanyRegistryRow[] {
 
   return rowsToMap.map((row) => ({
     name: pickValue(row, ["Nazwa", "Nazwa firmy", "Firma"]),
+    nip: pickValue(row, ["NIP"]),
+    regon: pickValue(row, ["REGON"]),
     krs: pickValue(row, ["KRS", "Numer KRS"]),
     address: pickValue(row, ["Adres", "Siedziba", "Adres siedziby"]),
     legalForm: pickValue(row, ["Forma prawna"]),
     shareCapital: pickValue(row, ["Kapitał zakładowy", "Kapital zakladowy"]),
     registrationDate: pickValue(row, ["Data rejestracji", "Rejestracja"]),
     mainActivity: pickValue(row, ["Główna działalność", "Glowna dzialalnosc", "PKD"]),
+    revenue: pickValue(row, ["Przychody", "Przychód", "Revenue"]),
+    opinions: pickValue(row, ["Opinie", "Ocena", "Liczba opinii"]),
   }));
 }
 

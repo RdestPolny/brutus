@@ -12,8 +12,8 @@ export function ReportView({ report }: { report: CompanyReport }) {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-sm text-gray-500">Raport dla NIP</p>
-          <h2 className="text-2xl font-semibold tracking-tight text-gray-950">{report.input.nip}</h2>
+          <p className="text-sm text-gray-500">Raport dla firmy</p>
+          <h2 className="text-2xl font-semibold tracking-tight text-gray-950">{report.input.companyName}</h2>
           <p className="mt-1 text-sm text-gray-500">
             Wygenerowano: {new Date(report.generatedAt).toLocaleString("pl-PL")}
           </p>
@@ -105,11 +105,13 @@ function RegistryTable({ report }: { report: CompanyReport }) {
         <thead>
           <tr className="bg-gray-100 text-left text-gray-600">
             <Header>Nazwa</Header>
+            <Header>NIP</Header>
+            <Header>REGON</Header>
             <Header>KRS</Header>
             <Header>Adres</Header>
             <Header>Forma prawna</Header>
-            <Header>Kapitał zakładowy</Header>
-            <Header>Data rejestracji</Header>
+            <Header>Przychody</Header>
+            <Header>Opinie</Header>
             <Header>Główna działalność</Header>
           </tr>
         </thead>
@@ -117,11 +119,13 @@ function RegistryTable({ report }: { report: CompanyReport }) {
           {report.registry.rows.map((row, index) => (
             <tr key={index} className="align-top">
               <Cell strong>{row.name}</Cell>
+              <Cell>{row.nip}</Cell>
+              <Cell>{row.regon}</Cell>
               <Cell>{row.krs}</Cell>
               <Cell>{row.address}</Cell>
               <Cell>{row.legalForm}</Cell>
-              <Cell>{row.shareCapital}</Cell>
-              <Cell>{row.registrationDate}</Cell>
+              <Cell>{row.revenue}</Cell>
+              <Cell>{row.opinions}</Cell>
               <Cell>{row.mainActivity}</Cell>
             </tr>
           ))}
@@ -449,7 +453,6 @@ function DebugModal({ report, onClose }: { report: CompanyReport; onClose: () =>
                     title="Parsed report"
                     value={{
                       registry: report.registry,
-                      perplexityFacts: report.perplexityFacts,
                       websiteFacts: report.websiteFacts,
                       digitalPresence: report.digitalPresence,
                       goWork: report.goWork,

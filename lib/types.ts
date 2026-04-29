@@ -1,15 +1,20 @@
 export interface ReportInput {
-  nip: string;
+  companyName: string;
+  nip?: string;
 }
 
 export interface CompanyRegistryRow {
   name: string;
+  nip: string;
+  regon: string;
   krs: string;
   address: string;
   legalForm: string;
   shareCapital: string;
   registrationDate: string;
   mainActivity: string;
+  revenue: string;
+  opinions: string;
 }
 
 export interface DigitalPresenceRow {
@@ -129,14 +134,14 @@ export interface CompanyReport {
   goWork: GoWorkReport;
   googlePlace: GooglePlaceReport;
   debug?: {
-    registryPrompt: string;
-    registryResponse: string;
-    registryRawResponse: unknown;
-    websiteFactsPerplexityPrompt: string;
-    websiteFactsPerplexityResponse: string;
-    websiteFactsPerplexityRawResponse: unknown;
+    registryPrompt?: string;
+    registryResponse?: string;
+    registryRawResponse?: unknown;
+    websiteFactsPerplexityPrompt?: string;
+    websiteFactsPerplexityResponse?: string;
+    websiteFactsPerplexityRawResponse?: unknown;
     websiteFactsRawResponse: unknown;
-    websiteFactsValidationRawResponse: unknown;
+    websiteFactsValidationRawResponse?: unknown;
     goWorkRawResponse: unknown;
     digitalPresencePrompt: string;
     digitalPresenceResponse: string;

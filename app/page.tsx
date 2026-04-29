@@ -5,7 +5,7 @@ import { ReportView } from "@/components/ReportView";
 import type { CompanyReport } from "@/lib/types";
 
 export default function Home() {
-  const [nip, setNip] = useState("");
+  const [companyName, setCompanyName] = useState("");
   const [report, setReport] = useState<CompanyReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -20,7 +20,7 @@ export default function Home() {
       const res = await fetch("/api/brief", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nip }),
+        body: JSON.stringify({ companyName }),
       });
 
       const text = await res.text();
@@ -40,22 +40,20 @@ export default function Home() {
       <div className="mx-auto max-w-6xl px-4 py-8">
         <header className="mb-6">
           <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Prezesol</h1>
-          <p className="mt-1 text-sm text-gray-500">Pierwsza iteracja raportu firmowego po NIP</p>
+          <p className="mt-1 text-sm text-gray-500">Raport firmowy po nazwie firmy</p>
         </header>
 
         <section className="mb-8 rounded-lg border border-gray-200 bg-white p-5">
           <form onSubmit={handleSubmit} className="flex flex-col gap-3 md:flex-row md:items-end">
             <div className="flex-1">
-              <label htmlFor="nip" className="mb-1 block text-sm font-medium text-gray-700">
-                NIP firmy
+              <label htmlFor="companyName" className="mb-1 block text-sm font-medium text-gray-700">
+                Nazwa firmy
               </label>
               <input
-                id="nip"
-                inputMode="numeric"
-                maxLength={13}
-                value={nip}
-                onChange={(event) => setNip(event.target.value)}
-                placeholder="np. 8971837029"
+                id="companyName"
+                value={companyName}
+                onChange={(event) => setCompanyName(event.target.value)}
+                placeholder="np. Strategiczni.pl"
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10"
               />
             </div>
@@ -69,7 +67,7 @@ export default function Home() {
           </form>
           {loading && (
             <p className="mt-3 text-sm text-gray-500">
-              Wykonuję zapytania Perplexity, scrapuję oficjalną stronę i GoWork, a dane czyszczę w Gemini.
+              Szukam profilu GoWork, scrapuję dane przez Firecrawl i uzupełniam stronę oraz social media.
             </p>
           )}
         </section>

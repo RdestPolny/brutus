@@ -8,7 +8,7 @@ const GOWORK_HOST = "gowork.pl";
 
 export async function fetchGoWorkReportWithDebug(
   company: CompanyRegistryRow,
-  _context: { nip: string; krs?: string }
+  _context?: { nip?: string; krs?: string }
 ): Promise<GoWorkReport & { debug: GoWorkDebug }> {
   const searchQuery = buildGoWorkSearchQuery(company.name);
   const searchResult = await searchFirecrawlWithDebug(searchQuery, { limit: 10, country: "PL" });
