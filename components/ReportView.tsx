@@ -36,6 +36,8 @@ export function ReportView({ report }: { report: CompanyReport }) {
         </div>
       </div>
 
+      <ExecutiveOverview report={report} />
+
       <Section title="1. Dane rejestrowe">
         <RegistryTable report={report} />
       </Section>
@@ -92,6 +94,145 @@ export function ReportView({ report }: { report: CompanyReport }) {
       )}
 
       {debugOpen && <DebugModal report={report} onClose={() => setDebugOpen(false)} />}
+    </div>
+  );
+}
+
+function ExecutiveOverview({ report }: { report: CompanyReport }) {
+  const financials = report.goWork.pages.flatMap((page) => page.financials);
+  const goWorkReviews = report.goWork.pages.flatMap((page) => page.reviews);
+  const googlePlace = report.googlePlace;
+  const goWorkSentiment = summarizeGoWorkSentiment(goWorkReviews);
+  const googleSentiment = summarizeGoogleSentiment(googlePlace.reviews);
+  const goWorkRating = calculateGoWorkRating(goWorkReviews);
+
+  return (
+    <section className="rounded-lg border border-gray-200 bg-white p-5">
+      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+        <div>
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-semibold text-gray-950">Finanse z GoWork</h3>
+              <p className="text-sm text-gray-500">Przychód netto i zysk / strata brutto na podstawie danych profilu</p>
+            </div>
+          </div>
+          <FinancialChart financials={financials} />
+        </div>
+
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            <RatingCard
+              title="Google Maps"
+              subtitle="klienci"
+              rating={googlePlace.rating}
+              count={googlePlace.reviewCount}
+              tone="blue"
+            />
+            <RatingCard
+              title="GoWork"
+              subtitle="pracownicy i kandydaci"
+              rating={goWorkRating.rating}
+              count={goWorkRating.count}
+              tone="red"
+            />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+            <SentimentCard title="Sentyment GoWork" value={goWorkSentiment} />
+            <SentimentCard title="Sentyment Google Maps" value={googleSentiment} />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FinancialChart({ financials }: { financials: Array<{ year: string; revenue: string; grossProfit: string }> }) {
+  const parsed = financials
+    .map((row) => ({
+      year: row.year,
+      revenueLabel: row.revenue,
+      grossProfitLabel: row.grossProfit,
+      revenue: parsePolishMoney(row.revenue),
+      grossProfit: parsePolishMoney(row.grossProfit),
+    }))
+    .filter((row) => row.year && (row.revenue !== null || row.grossProfit !== null));
+  const maxValue = Math.max(1, ...parsed.flatMap((row) => [Math.abs(row.revenue ?? 0), Math.abs(row.grossProfit ?? 0)]));
+
+  if (parsed.length === 0) return <Empty />;
+
+  return (
+    <div>
+      <div className="mb-3 flex gap-4 text-xs text-gray-600">
+        <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-blue-700" />Przychód</span>
+        <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-emerald-700" />Zysk / strata</span>
+      </div>
+      <div className="flex min-h-72 items-end gap-5 overflow-x-auto border-b border-gray-200 pb-3">
+        {parsed.map((row) => (
+          <div key={row.year} className="flex min-w-24 flex-1 flex-col items-center gap-2">
+            <div className="flex h-56 items-end gap-3">
+              <ChartBar value={row.revenue} maxValue={maxValue} label={row.revenueLabel} color="bg-blue-700" />
+              <ChartBar value={row.grossProfit} maxValue={maxValue} label={row.grossProfitLabel} color="bg-emerald-700" />
+            </div>
+            <div className="text-sm font-medium text-gray-900">{row.year}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChartBar({ value, maxValue, label, color }: { value: number | null; maxValue: number; label: string; color: string }) {
+  const height = value === null ? 0 : Math.max(6, Math.round((Math.abs(value) / maxValue) * 210));
+  const isNegative = (value ?? 0) < 0;
+
+  return (
+    <div className="flex h-56 w-10 flex-col items-center justify-end gap-1">
+      <span className="max-w-20 text-center text-xs font-medium text-gray-700">{label || "brak"}</span>
+      <div className={`w-9 rounded-t-md ${isNegative ? "bg-red-600" : color}`} style={{ height }} />
+    </div>
+  );
+}
+
+function RatingCard({
+  title,
+  subtitle,
+  rating,
+  count,
+  tone,
+}: {
+  title: string;
+  subtitle: string;
+  rating: number | null;
+  count: number | null;
+  tone: "blue" | "red";
+}) {
+  const color = tone === "blue" ? "border-blue-200 bg-blue-50 text-blue-950" : "border-red-200 bg-red-50 text-red-950";
+
+  return (
+    <div className={`rounded-md border p-4 ${color}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium">{title}</p>
+          <p className="text-xs opacity-75">{subtitle}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-2xl font-semibold">{rating !== null ? rating.toFixed(1) : "-"}</p>
+          <p className="text-xs opacity-75">{count !== null ? `${count} opinii` : "brak opinii"}</p>
+        </div>
+      </div>
+      <div className="mt-3 h-2 rounded-full bg-white/80">
+        <div className="h-2 rounded-full bg-current" style={{ width: `${rating !== null ? Math.min(100, (rating / 5) * 100) : 0}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function SentimentCard({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
+      <p className="mb-1 text-sm font-medium text-gray-900">{title}</p>
+      <p className="text-sm leading-6 text-gray-700">{value}</p>
     </div>
   );
 }
@@ -440,6 +581,88 @@ function formatSentiment(sentiment: "positive" | "negative" | "neutral" | "unkno
   if (sentiment === "negative") return "negatywny";
   if (sentiment === "neutral") return "neutralny";
   return "nieokreślony";
+}
+
+function parsePolishMoney(value: string): number | null {
+  const normalized = value.toLowerCase().replace(/\s+/g, " ").trim();
+  const match = normalized.match(/-?\d+(?:[,.]\d+)?/);
+  if (!match) return null;
+  const base = Number(match[0].replace(",", "."));
+  if (!Number.isFinite(base)) return null;
+  if (normalized.includes("mln")) return base * 1_000_000;
+  if (normalized.includes("tys")) return base * 1_000;
+  return base;
+}
+
+function calculateGoWorkRating(
+  reviews: Array<{ sentiment: "positive" | "negative" | "neutral" | "unknown" }>
+): { rating: number | null; count: number | null } {
+  const scored = reviews
+    .map((review) => {
+      if (review.sentiment === "positive") return 5;
+      if (review.sentiment === "neutral") return 3;
+      if (review.sentiment === "negative") return 1;
+      return null;
+    })
+    .filter((value): value is NonNullable<typeof value> => value !== null);
+
+  if (scored.length === 0) return { rating: null, count: reviews.length || null };
+  return {
+    rating: scored.reduce((sum, value) => sum + value, 0) / scored.length,
+    count: scored.length,
+  };
+}
+
+function summarizeGoWorkSentiment(
+  reviews: Array<{ sentiment: "positive" | "negative" | "neutral" | "unknown"; text: string }>
+): string {
+  if (reviews.length === 0) return "Brak pobranych opinii GoWork do oceny sentymentu.";
+  const counts = sentimentCounts(reviews);
+  const dominant = dominantSentiment(counts);
+  const sample = reviews.find((review) => review.sentiment === dominant && review.text)?.text ?? reviews.find((review) => review.text)?.text ?? "";
+
+  return `W pobranych wpisach GoWork dominuje wydźwięk ${formatSentiment(dominant)} (${counts[dominant]} z ${reviews.length} wpisów). ${sentimentExplanation(dominant)}${sample ? ` Przykładowy motyw: ${shortenText(sample, 180)}` : ""}`;
+}
+
+function summarizeGoogleSentiment(reviews: Array<{ rating: number | null; text: string }>): string {
+  if (reviews.length === 0) return "Brak pobranych opinii Google Maps do oceny sentymentu.";
+  const positive = reviews.filter((review) => (review.rating ?? 0) >= 4).length;
+  const negative = reviews.filter((review) => (review.rating ?? 5) <= 2).length;
+  const neutral = reviews.length - positive - negative;
+  const dominant = positive >= negative && positive >= neutral ? "positive" : negative >= neutral ? "negative" : "neutral";
+  const sample = reviews.find((review) =>
+    dominant === "positive" ? (review.rating ?? 0) >= 4 : dominant === "negative" ? (review.rating ?? 5) <= 2 : (review.rating ?? 0) === 3
+  )?.text ?? reviews.find((review) => review.text)?.text ?? "";
+
+  return `W opiniach Google Maps dominuje wydźwięk ${formatSentiment(dominant)} (${positive} pozytywnych, ${neutral} neutralnych, ${negative} negatywnych w pobranej próbce). ${sentimentExplanation(dominant)}${sample ? ` Przykładowy motyw: ${shortenText(sample, 180)}` : ""}`;
+}
+
+function sentimentCounts(reviews: Array<{ sentiment: "positive" | "negative" | "neutral" | "unknown" }>) {
+  return reviews.reduce(
+    (counts, review) => {
+      counts[review.sentiment] += 1;
+      return counts;
+    },
+    { positive: 0, negative: 0, neutral: 0, unknown: 0 }
+  );
+}
+
+function dominantSentiment(counts: Record<"positive" | "negative" | "neutral" | "unknown", number>) {
+  const entries = Object.entries(counts) as Array<["positive" | "negative" | "neutral" | "unknown", number]>;
+  return entries.sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function sentimentExplanation(sentiment: "positive" | "negative" | "neutral" | "unknown"): string {
+  if (sentiment === "positive") return "Komentarze częściej wskazują mocne strony doświadczenia z firmą.";
+  if (sentiment === "negative") return "Komentarze częściej sygnalizują ryzyka lub niezadowolenie.";
+  if (sentiment === "neutral") return "Komentarze mają mieszany lub informacyjny charakter.";
+  return "Część wpisów nie ma jednoznacznego wydźwięku.";
+}
+
+function shortenText(value: string, maxLength: number): string {
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= maxLength) return cleaned;
+  return `${cleaned.slice(0, maxLength - 1).trim()}…`;
 }
 
 function ReviewsList({
