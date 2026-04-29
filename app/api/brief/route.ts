@@ -7,6 +7,7 @@ import {
 import { parseMarkdownTable, pickValue } from "@/lib/markdownTable";
 import { fetchGooglePlaceReportWithDebug } from "@/lib/places";
 import { fetchWebsiteDigitalPresence, mergeDigitalPresenceRows } from "@/lib/website";
+import { fetchGoWorkReportWithDebug } from "@/lib/gowork";
 import {
   buildWebsiteFactsPerplexityPrompt,
   extractWebsiteFactsWithDebug,
@@ -14,7 +15,7 @@ import {
 } from "@/lib/websiteFacts";
 import type { CompanyRegistryRow, DigitalPresenceRow, PerplexityFactRow } from "@/lib/types";
 
-export const maxDuration = 180;
+export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   let body: { nip?: string };
@@ -81,6 +82,16 @@ export async function POST(req: NextRequest) {
       validation: websiteFactsValidationResult.validation,
     };
 
+    const goWorkResult = await fetchGoWorkReportWithDebug(firstRegistryRow, {
+      nip,
+      krs: firstRegistryRow.krs,
+    });
+    const goWork = {
+      profileUrl: goWorkResult.profileUrl,
+      searchRawMarkdown: goWorkResult.searchRawMarkdown,
+      pages: goWorkResult.pages,
+    };
+
     const placesQuery = [firstRegistryRow.name, firstRegistryRow.address]
       .filter(Boolean)
       .join(" ");
@@ -102,6 +113,7 @@ export async function POST(req: NextRequest) {
         rows: perplexityFactsRows,
       },
       websiteFacts,
+      goWork,
       googlePlace: googlePlaceResult.report,
       debug: {
         registryPrompt,
@@ -112,6 +124,7 @@ export async function POST(req: NextRequest) {
         websiteFactsPerplexityRawResponse: websiteFactsPerplexityResult.response,
         websiteFactsRawResponse: websiteFactsResult.debug,
         websiteFactsValidationRawResponse: websiteFactsValidationResult.debug,
+        goWorkRawResponse: goWorkResult.debug,
         digitalPresencePrompt,
         digitalPresenceResponse: digitalPresenceMarkdown,
         digitalPresenceRawResponse: digitalPresenceResult.response,
@@ -146,6 +159,11 @@ export async function POST(req: NextRequest) {
             name: "Gemini: walidacja danych ze strony",
             request: websiteFactsValidationResult.debug,
             response: websiteFacts.validation,
+          },
+          {
+            name: "Perplexity + Firecrawl + Gemini: GoWork",
+            request: goWorkResult.debug.searchRequest,
+            response: goWorkResult.debug,
           },
           {
             name: "Website fallback: linki ze strony firmowej",

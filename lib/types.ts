@@ -58,6 +58,25 @@ export interface WebsiteFactsReport {
   validation: WebsiteFactsValidation | null;
 }
 
+export interface GoWorkRow {
+  category: string;
+  label: string;
+  value: string;
+  sourceQuote: string;
+}
+
+export interface GoWorkPageReport {
+  title: string;
+  url: string;
+  rows: GoWorkRow[];
+}
+
+export interface GoWorkReport {
+  profileUrl: string | null;
+  searchRawMarkdown: string;
+  pages: GoWorkPageReport[];
+}
+
 export interface GooglePlaceReport {
   name: string | null;
   mapsUrl: string | null;
@@ -107,6 +126,7 @@ export interface CompanyReport {
     rows: PerplexityFactRow[];
   };
   websiteFacts: WebsiteFactsReport;
+  goWork: GoWorkReport;
   googlePlace: GooglePlaceReport;
   debug?: {
     registryPrompt: string;
@@ -117,6 +137,7 @@ export interface CompanyReport {
     websiteFactsPerplexityRawResponse: unknown;
     websiteFactsRawResponse: unknown;
     websiteFactsValidationRawResponse: unknown;
+    goWorkRawResponse: unknown;
     digitalPresencePrompt: string;
     digitalPresenceResponse: string;
     digitalPresenceRawResponse: unknown;

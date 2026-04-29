@@ -48,7 +48,11 @@ export function ReportView({ report }: { report: CompanyReport }) {
         <DigitalPresenceTable report={report} />
       </Section>
 
-      <Section title="4. Wizytówka Google Maps">
+      <Section title="4. GoWork">
+        <GoWorkSection report={report} />
+      </Section>
+
+      <Section title="5. Wizytówka Google Maps">
         <div className="grid gap-4 md:grid-cols-[1.2fr_1fr]">
           <div className="space-y-3">
             <InfoRow label="Nazwa" value={place.name} />
@@ -222,6 +226,63 @@ function DigitalPresenceTable({ report }: { report: CompanyReport }) {
   );
 }
 
+function GoWorkSection({ report }: { report: CompanyReport }) {
+  const goWork = report.goWork;
+  const pages = goWork?.pages ?? [];
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 text-sm md:grid-cols-[140px_1fr]">
+        <div className="text-gray-500">Profil</div>
+        <div className="font-medium text-gray-900">
+          {goWork?.profileUrl ? renderMaybeLink(goWork.profileUrl) : <Empty />}
+        </div>
+      </div>
+
+      {pages.length > 0 ? (
+        <div className="space-y-5">
+          {pages.map((page) => (
+            <div key={page.url} className="space-y-2">
+              <div>
+                <p className="text-sm font-medium text-gray-900">{page.title}</p>
+                <p className="text-xs text-gray-500">{renderMaybeLink(page.url)}</p>
+              </div>
+              {page.rows.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-separate border-spacing-0 text-sm">
+                    <thead>
+                      <tr className="bg-gray-100 text-left text-gray-600">
+                        <Header>Kategoria</Header>
+                        <Header>Informacja</Header>
+                        <Header>Wartość</Header>
+                        <Header>Fragment źródłowy</Header>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {page.rows.map((row, index) => (
+                        <tr key={`${page.url}-${row.label}-${index}`} className="align-top">
+                          <Cell strong>{formatGoWorkCategory(row.category)}</Cell>
+                          <Cell>{row.label}</Cell>
+                          <Cell>{row.value}</Cell>
+                          <Cell>{row.sourceQuote}</Cell>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <Empty />
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <RawMarkdownFallback value={goWork?.searchRawMarkdown ?? ""} />
+      )}
+    </div>
+  );
+}
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="rounded-lg border border-gray-200 bg-white">
@@ -290,6 +351,24 @@ function formatConfidence(confidence: "high" | "medium" | "low"): string {
   if (confidence === "high") return "wysoka";
   if (confidence === "low") return "niska";
   return "średnia";
+}
+
+function formatGoWorkCategory(category: string): string {
+  const labels: Record<string, string> = {
+    profile: "Profil",
+    ratings: "Oceny",
+    opinions: "Opinie",
+    contact: "Kontakt",
+    salary: "Zarobki",
+    jobs: "Praca",
+    recruitment: "Rekrutacja",
+    benefits: "Benefity",
+    questions: "Pytania",
+    metadata: "Metadane",
+    other: "Inne",
+  };
+
+  return labels[category] ?? category;
 }
 
 function ReviewsList({
@@ -373,6 +452,7 @@ function DebugModal({ report, onClose }: { report: CompanyReport; onClose: () =>
                       perplexityFacts: report.perplexityFacts,
                       websiteFacts: report.websiteFacts,
                       digitalPresence: report.digitalPresence,
+                      goWork: report.goWork,
                       googlePlace: report.googlePlace,
                     }}
                   />

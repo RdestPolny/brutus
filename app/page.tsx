@@ -69,7 +69,7 @@ export default function Home() {
           </form>
           {loading && (
             <p className="mt-3 text-sm text-gray-500">
-              Wykonuję zapytania Perplexity, scrapuję oficjalną stronę i waliduję dane w Gemini.
+              Wykonuję zapytania Perplexity, scrapuję oficjalną stronę i GoWork, a dane czyszczę w Gemini.
             </p>
           )}
         </section>
