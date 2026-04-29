@@ -1,7 +1,7 @@
 import { scrapeCleanHtmlWithDebug, searchFirecrawlWithDebug, type FirecrawlSearchResult } from "./firecrawl";
 import { askGeminiJsonWithDebug } from "./gemini";
 import { htmlToEssentialText } from "./htmlText";
-import type { CompanyRegistryRow, GoWorkReport, GoWorkRow } from "./types";
+import type { CompanyRegistryRow, GoWorkFinancialRow, GoWorkReport, GoWorkReview, GoWorkRow } from "./types";
 
 const MAX_GOWORK_PAGES = 5;
 const GOWORK_HOST = "gowork.pl";
@@ -62,6 +62,8 @@ export async function fetchGoWorkReportWithDebug(
           title: String(extraction.content?.pageTitle ?? titleFromGoWorkUrl(url)),
           url,
           rows,
+          reviews: (extraction.content?.reviews ?? []).map(normalizeGoWorkReview),
+          financials: (extraction.content?.financials ?? []).map(normalizeGoWorkFinancialRow),
         },
         debug: {
           url,
@@ -121,11 +123,32 @@ Zwróć WYŁĄCZNIE poprawny JSON w formacie:
       "value": "konkretna wartość lub informacja",
       "sourceQuote": "krótki fragment tekstu potwierdzający wartość"
     }
+  ],
+  "reviews": [
+    {
+      "author": "autor opinii lub wpisu",
+      "date": "data wpisu",
+      "type": "Pracownik | Były pracownik | Kandydat | Klient | Inne | nie znaleziono",
+      "sentiment": "positive | negative | neutral | unknown",
+      "text": "pełna treść opinii lub pytania bez elementów UI",
+      "reactionCount": "liczba reakcji/falek jeśli widoczna",
+      "companyReply": "odpowiedź firmy powiązana z opinią, jeśli widoczna"
+    }
+  ],
+  "financials": [
+    {
+      "year": "rok",
+      "revenue": "przychód netto",
+      "grossProfit": "zysk / strata brutto"
+    }
   ]
 }
 
 Instrukcje:
 - Wyciągnij wszystkie istotne informacje widoczne w tekście: nazwę profilu, ocenę, liczbę opinii, kategorie ocen, wyróżniki, pytania i odpowiedzi, dane kontaktowe, adresy, telefony, maile, linki, oferty pracy, widełki zarobków, benefity, typy umów, daty i inne fakty.
+- Dane firmowe z panelu bocznego, np. nazwa, adres, NIP, KRS, REGON, branża, opis profilu, zwróć w rows.
+- Opinie pracowników/kandydatów/klientów zwróć w reviews. Zachowaj możliwie pełną treść opinii, autora, datę, typ wpisu i odpowiedź firmy, jeśli jest bezpośrednio pod opinią.
+- Sekcję "Przychody i zysk" zwróć w financials, osobny rekord dla każdego roku. Zachowaj wartości tak jak w tekście, np. "2,4 mln", "-51,7 tys".
 - Dane tabelaryczne ze strony rozbij na osobne wiersze JSON.
 - Nie przepisuj regulaminów, menu, stopki, komunikatów cookies ani powtarzalnej nawigacji, chyba że zawierają dane o firmie.
 - Nie streszczaj wielu różnych wartości w jednym wierszu, jeśli da się je rozdzielić.
@@ -271,9 +294,37 @@ function normalizeGoWorkRow(row: Partial<GoWorkRow>): GoWorkRow {
   };
 }
 
+function normalizeGoWorkReview(review: Partial<GoWorkReview>): GoWorkReview {
+  return {
+    author: String(review.author ?? ""),
+    date: String(review.date ?? ""),
+    type: String(review.type ?? ""),
+    sentiment: normalizeSentiment(review.sentiment),
+    text: String(review.text ?? ""),
+    reactionCount: String(review.reactionCount ?? ""),
+    companyReply: String(review.companyReply ?? ""),
+  };
+}
+
+function normalizeGoWorkFinancialRow(row: Partial<GoWorkFinancialRow>): GoWorkFinancialRow {
+  return {
+    year: String(row.year ?? ""),
+    revenue: String(row.revenue ?? ""),
+    grossProfit: String(row.grossProfit ?? ""),
+  };
+}
+
+function normalizeSentiment(value: unknown): GoWorkReview["sentiment"] {
+  const normalized = String(value ?? "").toLowerCase();
+  if (normalized === "positive" || normalized === "negative" || normalized === "neutral") return normalized;
+  return "unknown";
+}
+
 interface GoWorkPageExtraction {
   pageTitle?: string;
   rows?: Array<Partial<GoWorkRow>>;
+  reviews?: Array<Partial<GoWorkReview>>;
+  financials?: Array<Partial<GoWorkFinancialRow>>;
 }
 
 interface GoWorkDebug {

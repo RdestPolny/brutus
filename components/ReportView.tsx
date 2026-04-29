@@ -233,6 +233,8 @@ function DigitalPresenceTable({ report }: { report: CompanyReport }) {
 function GoWorkSection({ report }: { report: CompanyReport }) {
   const goWork = report.goWork;
   const pages = goWork?.pages ?? [];
+  const reviews = pages.flatMap((page) => page.reviews.map((review) => ({ ...review, pageTitle: page.title })));
+  const financials = pages.flatMap((page) => page.financials);
 
   return (
     <div className="space-y-5">
@@ -242,6 +244,64 @@ function GoWorkSection({ report }: { report: CompanyReport }) {
           {goWork?.profileUrl ? renderMaybeLink(goWork.profileUrl) : <Empty />}
         </div>
       </div>
+
+      {reviews.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-900">Opinie i wpisy</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-0 text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left text-gray-600">
+                  <Header>Data</Header>
+                  <Header>Autor</Header>
+                  <Header>Typ</Header>
+                  <Header>Wydźwięk</Header>
+                  <Header>Treść</Header>
+                  <Header>Odpowiedź firmy</Header>
+                </tr>
+              </thead>
+              <tbody>
+                {reviews.map((review, index) => (
+                  <tr key={`${review.date}-${review.author}-${index}`} className="align-top">
+                    <Cell>{review.date}</Cell>
+                    <Cell strong>{review.author}</Cell>
+                    <Cell>{review.type}</Cell>
+                    <Cell>{formatSentiment(review.sentiment)}</Cell>
+                    <Cell>{review.text}</Cell>
+                    <Cell>{review.companyReply}</Cell>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {financials.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-900">Przychody i zysk</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-0 text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left text-gray-600">
+                  <Header>Rok</Header>
+                  <Header>Przychód netto</Header>
+                  <Header>Zysk / strata brutto</Header>
+                </tr>
+              </thead>
+              <tbody>
+                {financials.map((row, index) => (
+                  <tr key={`${row.year}-${index}`} className="align-top">
+                    <Cell strong>{row.year}</Cell>
+                    <Cell>{row.revenue}</Cell>
+                    <Cell>{row.grossProfit}</Cell>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {pages.length > 0 ? (
         <div className="space-y-5">
@@ -373,6 +433,13 @@ function formatGoWorkCategory(category: string): string {
   };
 
   return labels[category] ?? category;
+}
+
+function formatSentiment(sentiment: "positive" | "negative" | "neutral" | "unknown"): string {
+  if (sentiment === "positive") return "pozytywny";
+  if (sentiment === "negative") return "negatywny";
+  if (sentiment === "neutral") return "neutralny";
+  return "nieokreślony";
 }
 
 function ReviewsList({

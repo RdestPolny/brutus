@@ -219,10 +219,13 @@ function buildSeedCompany(companyName: string): CompanyRegistryRow {
 
 function buildRegistryRowsFromGoWork(companyName: string, goWork: GoWorkReport): CompanyRegistryRow[] {
   const rows = goWork.pages.flatMap((page) => page.rows);
+  const reviews = goWork.pages.flatMap((page) => page.reviews);
+  const financials = goWork.pages.flatMap((page) => page.financials);
   const name = findGoWorkValue(rows, ["nazwa", "firma", "profil"]) || companyName;
   const nip = findNumericGoWorkValue(rows, ["nip"], /\b\d{10}\b/);
   const krs = findNumericGoWorkValue(rows, ["krs"], /\b\d{10}\b/);
   const regon = findNumericGoWorkValue(rows, ["regon"], /\b\d{9,14}\b/);
+  const latestFinancials = financials.find((row) => row.revenue || row.grossProfit);
 
   return [
     {
@@ -235,8 +238,12 @@ function buildRegistryRowsFromGoWork(companyName: string, goWork: GoWorkReport):
       shareCapital: findGoWorkValue(rows, ["kapitał", "kapital"]),
       registrationDate: findGoWorkValue(rows, ["data rejestracji", "rozpoczęcie działalności", "rok założenia"]),
       mainActivity: findGoWorkValue(rows, ["działalność", "opis", "branża", "specjalizacja"]),
-      revenue: findGoWorkValue(rows, ["przychód", "przychody", "revenue", "obrót", "obroty"]),
-      opinions: findGoWorkValue(rows, ["opinie", "ocena", "rating", "liczba opinii"]),
+      revenue: latestFinancials
+        ? [latestFinancials.year, latestFinancials.revenue, latestFinancials.grossProfit].filter(Boolean).join(": ")
+        : findGoWorkValue(rows, ["przychód", "przychody", "revenue", "obrót", "obroty"]),
+      opinions: reviews.length > 0
+        ? `${reviews.length} pobranych wpisów`
+        : findGoWorkValue(rows, ["opinie", "ocena", "rating", "liczba opinii"]),
     },
   ];
 }

@@ -70,10 +70,28 @@ export interface GoWorkRow {
   sourceQuote: string;
 }
 
+export interface GoWorkReview {
+  author: string;
+  date: string;
+  type: string;
+  sentiment: "positive" | "negative" | "neutral" | "unknown";
+  text: string;
+  reactionCount: string;
+  companyReply: string;
+}
+
+export interface GoWorkFinancialRow {
+  year: string;
+  revenue: string;
+  grossProfit: string;
+}
+
 export interface GoWorkPageReport {
   title: string;
   url: string;
   rows: GoWorkRow[];
+  reviews: GoWorkReview[];
+  financials: GoWorkFinancialRow[];
 }
 
 export interface GoWorkReport {
