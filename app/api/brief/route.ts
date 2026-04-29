@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
             response: websiteFacts.validation,
           },
           {
-            name: "Perplexity + Firecrawl + Gemini: GoWork",
+            name: "Firecrawl Search + Firecrawl + Gemini: GoWork",
             request: goWorkResult.debug.searchRequest,
             response: goWorkResult.debug,
           },

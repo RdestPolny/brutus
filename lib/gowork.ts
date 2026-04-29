@@ -1,8 +1,6 @@
-import { scrapeCleanHtmlWithDebug } from "./firecrawl";
+import { scrapeCleanHtmlWithDebug, searchFirecrawlWithDebug, type FirecrawlSearchResult } from "./firecrawl";
 import { askGeminiJsonWithDebug } from "./gemini";
 import { htmlToEssentialText } from "./htmlText";
-import { parseMarkdownTable, pickValue } from "./markdownTable";
-import { askPerplexityTableWithDebug } from "./perplexity";
 import type { CompanyRegistryRow, GoWorkReport, GoWorkRow } from "./types";
 
 const MAX_GOWORK_PAGES = 5;
@@ -10,16 +8,18 @@ const GOWORK_HOST = "gowork.pl";
 
 export async function fetchGoWorkReportWithDebug(
   company: CompanyRegistryRow,
-  context: { nip: string; krs?: string }
+  _context: { nip: string; krs?: string }
 ): Promise<GoWorkReport & { debug: GoWorkDebug }> {
-  const searchPrompt = buildGoWorkProfilePrompt(company, context);
-  const searchResult = await askPerplexityTableWithDebug(searchPrompt);
-  const profileUrl = extractGoWorkProfileUrl(searchResult.content, searchResult.response);
+  const searchQuery = buildGoWorkSearchQuery(company.name);
+  const searchResult = await searchFirecrawlWithDebug(searchQuery, { limit: 10, country: "PL" });
+  const profileUrl = extractGoWorkProfileUrl(searchResult.results, company.name);
 
   if (!profileUrl) {
     return {
       profileUrl: null,
-      searchRawMarkdown: searchResult.content,
+      searchRawMarkdown: searchResult.results
+        .map((result) => `| ${result.title ?? ""} | ${result.url} | ${result.description ?? ""} |`)
+        .join("\n"),
       pages: [],
       debug: {
         searchRequest: searchResult.request,
@@ -78,7 +78,9 @@ export async function fetchGoWorkReportWithDebug(
 
   return {
     profileUrl,
-    searchRawMarkdown: searchResult.content,
+    searchRawMarkdown: searchResult.results
+      .map((result) => `| ${result.title ?? ""} | ${result.url} | ${result.description ?? ""} |`)
+      .join("\n"),
     pages: extractedPages.map((item) => item.page),
     debug: {
       searchRequest: searchResult.request,
@@ -89,21 +91,8 @@ export async function fetchGoWorkReportWithDebug(
   };
 }
 
-function buildGoWorkProfilePrompt(company: CompanyRegistryRow, context: { nip: string; krs?: string }): string {
-  const searchTerm = `${deriveShortBrandName(company.name)} - gowork`;
-
-  return `Wyszukaj dokładnie: ${searchTerm}
-
-Przygotuj tabelę Markdown z kolumnami dokładnie:
-Nazwa profilu | URL GoWork | Uwagi
-
-Zasady:
-- Szukaj profilu GoWork dla firmy: ${company.name}.
-- Pomocniczo porównaj NIP ${context.nip}${context.krs ? ` i KRS ${context.krs}` : ""}, jeśli pojawią się w wyniku.
-- Podaj tylko profil w domenie gowork.pl.
-- Preferuj URL profilu opinii, np. https://www.gowork.pl/opinie_czytaj,21660930 albo pełny profil z identyfikatorem.
-- Jeśli profilu nie znajdziesz, wpisz "nie znaleziono".
-- Zwróć tylko tabelę, bez dodatkowego komentarza.`;
+function buildGoWorkSearchQuery(companyName: string): string {
+  return `${deriveShortBrandName(companyName)} gowork`;
 }
 
 function deriveShortBrandName(companyName: string): string {
@@ -111,6 +100,7 @@ function deriveShortBrandName(companyName: string): string {
     .replace(/spółka z ograniczoną odpowiedzialnością/gi, "")
     .replace(/sp\.?\s*z\s*o\.?o\.?/gi, "")
     .replace(/\b(s\.?a\.?|spółka akcyjna)\b/gi, "")
+    .replace(/\.(pl|com|eu|net|org)\b/gi, " ")
     .replace(/[^\p{L}\p{N}\s.-]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -146,26 +136,23 @@ TEKST:
 ${text}`;
 }
 
-function extractGoWorkProfileUrl(markdown: string, response: unknown): string | null {
-  const tableUrls = parseMarkdownTable(markdown)
-    .flatMap((row) => [pickValue(row, ["URL GoWork", "URL", "Adres"]), pickValue(row, ["Uwagi"])])
-    .map((value) => normalizeGoWorkUrlFromText(value))
-    .filter((value): value is string => Boolean(value));
+function extractGoWorkProfileUrl(results: FirecrawlSearchResult[], companyName: string): string | null {
+  const brandTokens = goWorkMatchTokens(companyName);
+  const candidates = results
+    .map((result) => {
+      const url = normalizeGoWorkUrlFromText(result.url);
+      if (!url) return null;
+      const searchable = `${result.title ?? ""} ${result.description ?? ""} ${result.url}`.toLowerCase();
+      const score =
+        brandTokens.reduce((sum, token) => sum + (searchable.includes(token) ? 5 : 0), 0) +
+        (new URL(url).pathname.includes("opinie_czytaj") ? 3 : 0) +
+        (/,\d+/.test(new URL(url).pathname) ? 2 : 0);
+      return { url, score };
+    })
+    .filter((candidate): candidate is { url: string; score: number } => Boolean(candidate))
+    .sort((a, b) => b.score - a.score);
 
-  if (tableUrls.length > 0) return tableUrls[0];
-
-  const raw = response as {
-    citations?: string[];
-    search_results?: Array<{ url?: string; title?: string; snippet?: string }>;
-  };
-  const responseUrls = [
-    ...(raw.search_results ?? []).map((result) => result.url),
-    ...(raw.citations ?? []),
-  ]
-    .map((value) => normalizeGoWorkUrlFromText(value ?? ""))
-    .filter((value): value is string => Boolean(value));
-
-  return responseUrls[0] ?? null;
+  return candidates[0]?.url ?? null;
 }
 
 function normalizeGoWorkUrlFromText(value: string): string | null {
@@ -180,6 +167,14 @@ function normalizeGoWorkUrlFromText(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function goWorkMatchTokens(companyName: string): string[] {
+  return deriveShortBrandName(companyName)
+    .toLowerCase()
+    .split(/[^a-z0-9ąćęłńóśźż.]+/i)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3);
 }
 
 function discoverGoWorkPageUrls(profileUrl: string, html: string): string[] {
