@@ -105,43 +105,41 @@ function ExecutiveOverview({ report }: { report: CompanyReport }) {
   const goWorkSentiment = summarizeGoWorkSentiment(goWorkReviews);
   const googleSentiment = summarizeGoogleSentiment(googlePlace.reviews);
   const goWorkRating = calculateGoWorkRating(goWorkReviews);
+  const latestFinancial = latestFinancialRow(financials);
 
   return (
-    <section className="rounded-lg border border-gray-200 bg-white p-5">
-      <div className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+    <section className="rounded-lg border border-gray-200 bg-white p-4 md:p-5">
+      <div className="mb-4 flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
         <div>
-          <div className="mb-4 flex items-center justify-between gap-4">
-            <div>
-              <h3 className="text-base font-semibold text-gray-950">Finanse z GoWork</h3>
-              <p className="text-sm text-gray-500">Przychód netto i zysk / strata brutto na podstawie danych profilu</p>
-            </div>
-          </div>
-          <FinancialChart financials={financials} />
+          <h3 className="text-base font-semibold text-gray-950">Podsumowanie</h3>
+          <p className="text-sm text-gray-500">Finanse, oceny i sentyment z GoWork oraz Google Maps</p>
         </div>
+      </div>
 
-        <div className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            <RatingCard
-              title="Google Maps"
-              subtitle="klienci"
-              rating={googlePlace.rating}
-              count={googlePlace.reviewCount}
-              tone="blue"
-            />
-            <RatingCard
-              title="GoWork"
-              subtitle="pracownicy i kandydaci"
-              rating={goWorkRating.rating}
-              count={goWorkRating.count}
-              tone="red"
-            />
-          </div>
+      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <RatingCard
+          title="Google Maps"
+          subtitle="klienci"
+          rating={googlePlace.rating}
+          count={googlePlace.reviewCount}
+          tone="blue"
+        />
+        <RatingCard
+          title="GoWork"
+          subtitle="pracownicy i kandydaci"
+          rating={goWorkRating.rating}
+          count={goWorkRating.count}
+          tone="red"
+        />
+        <FinancialMetricCard label={`Przychód ${latestFinancial?.year ?? ""}`} value={latestFinancial?.revenue || "brak"} tone="blue" />
+        <FinancialMetricCard label={`Zysk / strata ${latestFinancial?.year ?? ""}`} value={latestFinancial?.grossProfit || "brak"} tone="green" />
+      </div>
 
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-            <SentimentCard title="Sentyment GoWork" value={goWorkSentiment} />
-            <SentimentCard title="Sentyment Google Maps" value={googleSentiment} />
-          </div>
-        </div>
+      <FinancialChart financials={financials} />
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-2">
+        <SentimentCard title="Sentyment GoWork" value={goWorkSentiment} />
+        <SentimentCard title="Sentyment Google Maps" value={googleSentiment} />
       </div>
     </section>
   );
@@ -162,15 +160,18 @@ function FinancialChart({ financials }: { financials: Array<{ year: string; reve
   if (parsed.length === 0) return <Empty />;
 
   return (
-    <div>
-      <div className="mb-3 flex gap-4 text-xs text-gray-600">
-        <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-blue-700" />Przychód</span>
-        <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-emerald-700" />Zysk / strata</span>
+    <div className="rounded-md border border-gray-200 p-4">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm font-medium text-gray-900">Przychód i wynik brutto</p>
+        <div className="flex gap-4 text-xs text-gray-600">
+          <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-blue-700" />Przychód</span>
+          <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-emerald-700" />Zysk / strata</span>
+        </div>
       </div>
-      <div className="flex min-h-72 items-end gap-5 overflow-x-auto border-b border-gray-200 pb-3">
+      <div className="flex min-h-56 items-end gap-4 overflow-x-auto border-b border-gray-200 pb-3">
         {parsed.map((row) => (
           <div key={row.year} className="flex min-w-24 flex-1 flex-col items-center gap-2">
-            <div className="flex h-56 items-end gap-3">
+            <div className="flex h-44 items-end gap-3">
               <ChartBar value={row.revenue} maxValue={maxValue} label={row.revenueLabel} color="bg-blue-700" />
               <ChartBar value={row.grossProfit} maxValue={maxValue} label={row.grossProfitLabel} color="bg-emerald-700" />
             </div>
@@ -183,11 +184,11 @@ function FinancialChart({ financials }: { financials: Array<{ year: string; reve
 }
 
 function ChartBar({ value, maxValue, label, color }: { value: number | null; maxValue: number; label: string; color: string }) {
-  const height = value === null ? 0 : Math.max(6, Math.round((Math.abs(value) / maxValue) * 210));
+  const height = value === null ? 0 : Math.max(6, Math.round((Math.abs(value) / maxValue) * 150));
   const isNegative = (value ?? 0) < 0;
 
   return (
-    <div className="flex h-56 w-10 flex-col items-center justify-end gap-1">
+    <div className="flex h-44 w-10 flex-col items-center justify-end gap-1">
       <span className="max-w-20 text-center text-xs font-medium text-gray-700">{label || "brak"}</span>
       <div className={`w-9 rounded-t-md ${isNegative ? "bg-red-600" : color}`} style={{ height }} />
     </div>
@@ -210,7 +211,7 @@ function RatingCard({
   const color = tone === "blue" ? "border-blue-200 bg-blue-50 text-blue-950" : "border-red-200 bg-red-50 text-red-950";
 
   return (
-    <div className={`rounded-md border p-4 ${color}`}>
+    <div className={`rounded-md border p-3 ${color}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium">{title}</p>
@@ -228,11 +229,22 @@ function RatingCard({
   );
 }
 
+function FinancialMetricCard({ label, value, tone }: { label: string; value: string; tone: "blue" | "green" }) {
+  const color = tone === "blue" ? "border-blue-200 bg-blue-50 text-blue-950" : "border-emerald-200 bg-emerald-50 text-emerald-950";
+
+  return (
+    <div className={`rounded-md border p-3 ${color}`}>
+      <p className="text-xs opacity-75">{label.trim()}</p>
+      <p className="mt-2 text-2xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
 function SentimentCard({ title, value }: { title: string; value: string }) {
   return (
-    <div className="rounded-md border border-gray-200 bg-gray-50 p-4">
+    <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
       <p className="mb-1 text-sm font-medium text-gray-900">{title}</p>
-      <p className="text-sm leading-6 text-gray-700">{value}</p>
+      <p className="max-h-28 overflow-hidden text-sm leading-6 text-gray-700">{value}</p>
     </div>
   );
 }
@@ -592,6 +604,12 @@ function parsePolishMoney(value: string): number | null {
   if (normalized.includes("mln")) return base * 1_000_000;
   if (normalized.includes("tys")) return base * 1_000;
   return base;
+}
+
+function latestFinancialRow(financials: Array<{ year: string; revenue: string; grossProfit: string }>) {
+  return [...financials]
+    .filter((row) => row.year && (row.revenue || row.grossProfit))
+    .sort((a, b) => Number(b.year.replace(/\D/g, "")) - Number(a.year.replace(/\D/g, "")))[0] ?? null;
 }
 
 function calculateGoWorkRating(
