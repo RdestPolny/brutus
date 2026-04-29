@@ -90,18 +90,32 @@ export async function fetchGoWorkReportWithDebug(
 }
 
 function buildGoWorkProfilePrompt(company: CompanyRegistryRow, context: { nip: string; krs?: string }): string {
-  return `${company.name} - znajdź profil tej firmy w serwisie GoWork.pl z opiniami o pracodawcy.
-NIP: ${context.nip}${context.krs ? `, KRS: ${context.krs}` : ""}.
-Adres rejestrowy: ${company.address || "nie znaleziono"}.
+  const searchTerm = `${deriveShortBrandName(company.name)} - gowork`;
+
+  return `Wyszukaj dokładnie: ${searchTerm}
 
 Przygotuj tabelę Markdown z kolumnami dokładnie:
 Nazwa profilu | URL GoWork | Uwagi
 
 Zasady:
-- Podaj tylko profil w domenie gowork.pl pasujący do tej konkretnej firmy.
+- Szukaj profilu GoWork dla firmy: ${company.name}.
+- Pomocniczo porównaj NIP ${context.nip}${context.krs ? ` i KRS ${context.krs}` : ""}, jeśli pojawią się w wyniku.
+- Podaj tylko profil w domenie gowork.pl.
 - Preferuj URL profilu opinii, np. https://www.gowork.pl/opinie_czytaj,21660930 albo pełny profil z identyfikatorem.
 - Jeśli profilu nie znajdziesz, wpisz "nie znaleziono".
 - Zwróć tylko tabelę, bez dodatkowego komentarza.`;
+}
+
+function deriveShortBrandName(companyName: string): string {
+  const cleaned = companyName
+    .replace(/spółka z ograniczoną odpowiedzialnością/gi, "")
+    .replace(/sp\.?\s*z\s*o\.?o\.?/gi, "")
+    .replace(/\b(s\.?a\.?|spółka akcyjna)\b/gi, "")
+    .replace(/[^\p{L}\p{N}\s.-]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const firstToken = cleaned.split(/\s+/).find((token) => token.length >= 3);
+  return firstToken ?? cleaned ?? companyName;
 }
 
 function buildGoWorkExtractionPrompt(url: string, text: string): string {
