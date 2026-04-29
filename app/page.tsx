@@ -67,7 +67,7 @@ export default function Home() {
           </form>
           {loading && (
             <p className="mt-3 text-sm text-gray-500">
-              Szukam profilu GoWork, scrapuję dane przez Firecrawl i uzupełniam stronę oraz social media.
+              Szukam profilu GoWork, pobieram odpis KRS, scrapuję dane przez Firecrawl i uzupełniam stronę oraz social media.
             </p>
           )}
         </section>

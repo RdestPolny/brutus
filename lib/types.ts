@@ -100,6 +100,49 @@ export interface GoWorkReport {
   pages: GoWorkPageReport[];
 }
 
+export interface KrsFact {
+  category: string;
+  label: string;
+  value: string;
+  source: string;
+}
+
+export interface KrsPerson {
+  role: string;
+  name: string;
+  function: string;
+  suspended: boolean | null;
+}
+
+export interface KrsActivity {
+  code: string;
+  description: string;
+  isMain: boolean;
+}
+
+export interface KrsFiling {
+  type: string;
+  filedAt: string;
+  period: string;
+}
+
+export interface KrsReport {
+  krs: string | null;
+  sourceUrl: string | null;
+  fullSourceUrl: string | null;
+  status: "found" | "not_found" | "skipped" | "error";
+  message: string | null;
+  facts: KrsFact[];
+  boardMembers: KrsPerson[];
+  supervisoryBoardMembers: KrsPerson[];
+  shareholders: KrsFact[];
+  activities: KrsActivity[];
+  branches: KrsFact[];
+  filings: KrsFiling[];
+  transformations: KrsFact[];
+  recentChanges: KrsFact[];
+}
+
 export interface GooglePlaceReport {
   name: string | null;
   mapsUrl: string | null;
@@ -150,6 +193,7 @@ export interface CompanyReport {
   };
   websiteFacts: WebsiteFactsReport;
   goWork: GoWorkReport;
+  krs: KrsReport;
   googlePlace: GooglePlaceReport;
   debug?: {
     registryPrompt?: string;
@@ -161,6 +205,7 @@ export interface CompanyReport {
     websiteFactsRawResponse: unknown;
     websiteFactsValidationRawResponse?: unknown;
     goWorkRawResponse: unknown;
+    krsRawResponse: unknown;
     digitalPresencePrompt: string;
     digitalPresenceResponse: string;
     digitalPresenceRawResponse: unknown;

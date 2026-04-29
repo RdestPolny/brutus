@@ -8,7 +8,8 @@ import { fetchGooglePlaceReportWithDebug } from "@/lib/places";
 import { fetchWebsiteDigitalPresence, mergeDigitalPresenceRows } from "@/lib/website";
 import { fetchGoWorkReportWithDebug } from "@/lib/gowork";
 import { extractWebsiteFactsWithDebug } from "@/lib/websiteFacts";
-import type { CompanyRegistryRow, DigitalPresenceRow, GoWorkReport, PerplexityFactRow } from "@/lib/types";
+import { fetchKrsReportWithDebug, mergeRegistryRowsWithKrs } from "@/lib/krs";
+import type { CompanyRegistryRow, DigitalPresenceRow, GoWorkReport, KrsReport, PerplexityFactRow } from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -35,22 +36,29 @@ export async function POST(req: NextRequest) {
       pages: goWorkResult.pages,
     };
 
-    const registryRows = buildRegistryRowsFromGoWork(companyName, goWork);
-    const firstRegistryRow = registryRows[0];
+    const goWorkRegistryRows = buildRegistryRowsFromGoWork(companyName, goWork);
+    const krsSeedRow = goWorkRegistryRows[0];
 
-    if (!firstRegistryRow?.name) {
+    if (!krsSeedRow?.name) {
       throw new Error("Nie udało się odczytać nazwy firmy z GoWork");
     }
 
+    const krsResult = await fetchKrsReportWithDebug(krsSeedRow.krs);
+    const registryRows = mergeRegistryRowsWithKrs(goWorkRegistryRows, krsResult.report);
+    const firstRegistryRow = registryRows[0];
+
     const digitalPresencePrompt = buildDigitalPresencePrompt(firstRegistryRow.name, {
-      officialWebsite: extractWebsiteFromGoWork(goWork),
+      officialWebsite: extractWebsiteFromKrs(krsResult.report) ?? extractWebsiteFromGoWork(goWork),
       nip: firstRegistryRow.nip || undefined,
       krs: firstRegistryRow.krs || undefined,
     });
     const digitalPresenceResult = await askPerplexityTableWithDebug(digitalPresencePrompt);
     const digitalPresenceMarkdown = digitalPresenceResult.content;
     const perplexityDigitalRows = parseDigitalPresenceRows(digitalPresenceMarkdown);
-    const resolvedWebsite = extractWebsiteFromGoWork(goWork) ?? extractWebsiteFromDigitalRows(perplexityDigitalRows);
+    const resolvedWebsite =
+      extractWebsiteFromKrs(krsResult.report) ??
+      extractWebsiteFromGoWork(goWork) ??
+      extractWebsiteFromDigitalRows(perplexityDigitalRows);
     const websiteFactsResult = await extractWebsiteFactsWithDebug(resolvedWebsite);
     const websitePresenceResult = await fetchWebsiteDigitalPresence(resolvedWebsite);
     const digitalPresenceRows = mergeDigitalPresenceRows(
@@ -88,10 +96,12 @@ export async function POST(req: NextRequest) {
       },
       websiteFacts,
       goWork,
+      krs: krsResult.report,
       googlePlace: googlePlaceResult.report,
       debug: {
         websiteFactsRawResponse: websiteFactsResult.debug,
         goWorkRawResponse: goWorkResult.debug,
+        krsRawResponse: krsResult.response,
         digitalPresencePrompt,
         digitalPresenceResponse: digitalPresenceMarkdown,
         digitalPresenceRawResponse: digitalPresenceResult.response,
@@ -105,6 +115,11 @@ export async function POST(req: NextRequest) {
             name: "Firecrawl Search + Firecrawl + Gemini: GoWork",
             request: goWorkResult.debug.searchRequest,
             response: goWorkResult.debug,
+          },
+          {
+            name: "KRS OpenAPI: odpis aktualny i pełny",
+            request: krsResult.request,
+            response: krsResult.response,
           },
           {
             name: "Perplexity: strona i social media",
@@ -281,6 +296,17 @@ function extractWebsiteFromGoWork(goWork: GoWorkReport): string | null {
   }
 
   return null;
+}
+
+function extractWebsiteFromKrs(krs: KrsReport): string | null {
+  const website = krs.facts.find((fact) => fact.label === "WWW według KRS")?.value;
+  if (!website) return null;
+  try {
+    const url = new URL(website);
+    return `${url.protocol}//${url.hostname.replace(/^www\./, "")}`;
+  } catch {
+    return null;
+  }
 }
 
 function inferDomainFromCompanyName(companyName: string): string | null {

@@ -42,19 +42,23 @@ export function ReportView({ report }: { report: CompanyReport }) {
         <RegistryTable report={report} />
       </Section>
 
-      <Section title="2. Dane z oficjalnej strony">
+      <Section title="2. KRS OpenAPI">
+        <KrsSection report={report} />
+      </Section>
+
+      <Section title="3. Dane z oficjalnej strony">
         <WebsiteFactsSection report={report} />
       </Section>
 
-      <Section title="3. Strona i social media">
+      <Section title="4. Strona i social media">
         <DigitalPresenceTable report={report} />
       </Section>
 
-      <Section title="4. GoWork">
+      <Section title="5. GoWork">
         <GoWorkSection report={report} />
       </Section>
 
-      <Section title="5. Wizytówka Google Maps">
+      <Section title="6. Wizytówka Google Maps">
         <div className="grid gap-4 md:grid-cols-[1.2fr_1fr]">
           <div className="space-y-3">
             <InfoRow label="Nazwa" value={place.name} />
@@ -284,6 +288,162 @@ function RegistryTable({ report }: { report: CompanyReport }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function KrsSection({ report }: { report: CompanyReport }) {
+  const krs = report.krs;
+  if (!krs || krs.status !== "found") {
+    return (
+      <div className="space-y-3 text-sm">
+        <InfoRow label="Status" value={formatKrsStatus(krs?.status)} />
+        <InfoRow label="KRS" value={krs?.krs} />
+        <InfoRow label="Źródło" value={krs?.sourceUrl} link />
+        <div className="text-gray-700">{krs?.message || "Brak danych z KRS OpenAPI"}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 text-sm md:grid-cols-[140px_1fr]">
+        <div className="text-gray-500">Odpis aktualny</div>
+        <div className="font-medium text-gray-900">{krs.sourceUrl ? renderMaybeLink(krs.sourceUrl) : <Empty />}</div>
+        <div className="text-gray-500">Odpis pełny</div>
+        <div className="font-medium text-gray-900">{krs.fullSourceUrl ? renderMaybeLink(krs.fullSourceUrl) : <Empty />}</div>
+      </div>
+
+      <SimpleFactsTable facts={krs.facts} />
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <PeopleTable title="Zarząd / reprezentacja" people={krs.boardMembers} />
+        <PeopleTable title="Rada nadzorcza / organ nadzoru" people={krs.supervisoryBoardMembers} />
+      </div>
+
+      {krs.activities.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-900">PKD / działalność</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-0 text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left text-gray-600">
+                  <Header>Typ</Header>
+                  <Header>Kod</Header>
+                  <Header>Opis</Header>
+                </tr>
+              </thead>
+              <tbody>
+                {krs.activities.map((activity, index) => (
+                  <tr key={`${activity.code}-${index}`} className="align-top">
+                    <Cell strong>{activity.isMain ? "przeważająca" : "pozostała"}</Cell>
+                    <Cell>{activity.code}</Cell>
+                    <Cell>{activity.description}</Cell>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <SimpleFactsTable title="Oddziały / obszar działania" facts={krs.branches} />
+      <SimpleFactsTable title="Struktura własnościowa" facts={krs.shareholders} />
+      <SimpleFactsTable title="Fuzje, przejęcia, przekształcenia" facts={krs.transformations} />
+
+      {krs.filings.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-900">Wzmianki o dokumentach finansowych</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-0 text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left text-gray-600">
+                  <Header>Dokument</Header>
+                  <Header>Data złożenia</Header>
+                  <Header>Okres</Header>
+                </tr>
+              </thead>
+              <tbody>
+                {krs.filings.map((filing, index) => (
+                  <tr key={`${filing.type}-${filing.period}-${index}`} className="align-top">
+                    <Cell strong>{filing.type}</Cell>
+                    <Cell>{filing.filedAt}</Cell>
+                    <Cell>{filing.period}</Cell>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SimpleFactsTable({ facts, title }: { facts: Array<{ category: string; label: string; value: string }>; title?: string }) {
+  if (facts.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {title && <p className="text-sm font-medium text-gray-900">{title}</p>}
+      <div className="overflow-x-auto">
+        <table className="min-w-full border-separate border-spacing-0 text-sm">
+          <thead>
+            <tr className="bg-gray-100 text-left text-gray-600">
+              <Header>Kategoria</Header>
+              <Header>Informacja</Header>
+              <Header>Wartość</Header>
+            </tr>
+          </thead>
+          <tbody>
+            {facts.map((fact, index) => (
+              <tr key={`${fact.category}-${fact.label}-${index}`} className="align-top">
+                <Cell>{fact.category}</Cell>
+                <Cell strong>{fact.label}</Cell>
+                <Cell>{renderMaybeLink(fact.value)}</Cell>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function PeopleTable({
+  title,
+  people,
+}: {
+  title: string;
+  people: Array<{ role: string; name: string; function: string; suspended: boolean | null }>;
+}) {
+  if (people.length === 0) return <div><p className="mb-2 text-sm font-medium text-gray-900">{title}</p><Empty /></div>;
+
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium text-gray-900">{title}</p>
+      <div className="overflow-x-auto">
+        <table className="min-w-full border-separate border-spacing-0 text-sm">
+          <thead>
+            <tr className="bg-gray-100 text-left text-gray-600">
+              <Header>Organ</Header>
+              <Header>Osoba</Header>
+              <Header>Funkcja</Header>
+              <Header>Status</Header>
+            </tr>
+          </thead>
+          <tbody>
+            {people.map((person, index) => (
+              <tr key={`${person.role}-${person.name}-${index}`} className="align-top">
+                <Cell>{person.role}</Cell>
+                <Cell strong>{person.name}</Cell>
+                <Cell>{person.function}</Cell>
+                <Cell>{person.suspended === null ? "" : person.suspended ? "zawieszona" : "aktywna"}</Cell>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -562,6 +722,14 @@ function renderMaybeLink(value: string) {
 function formatRating(rating: number | null, count: number | null): string | null {
   if (rating === null) return null;
   return `${rating}/5${count !== null ? ` (${count} opinii)` : ""}`;
+}
+
+function formatKrsStatus(status: "found" | "not_found" | "skipped" | "error" | undefined): string | null {
+  if (!status) return null;
+  if (status === "found") return "znaleziono";
+  if (status === "not_found") return "nie znaleziono";
+  if (status === "skipped") return "pominięto";
+  return "błąd";
 }
 
 function formatConfidence(confidence: "high" | "medium" | "low"): string {
