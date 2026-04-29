@@ -40,11 +40,15 @@ export function ReportView({ report }: { report: CompanyReport }) {
         <RegistryTable report={report} />
       </Section>
 
-      <Section title="2. Strona i social media">
+      <Section title="2. Dane z oficjalnej strony">
+        <WebsiteFactsSection report={report} />
+      </Section>
+
+      <Section title="3. Strona i social media">
         <DigitalPresenceTable report={report} />
       </Section>
 
-      <Section title="3. Wizytówka Google Maps">
+      <Section title="4. Wizytówka Google Maps">
         <div className="grid gap-4 md:grid-cols-[1.2fr_1fr]">
           <div className="space-y-3">
             <InfoRow label="Nazwa" value={place.name} />
@@ -119,6 +123,72 @@ function RegistryTable({ report }: { report: CompanyReport }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function WebsiteFactsSection({ report }: { report: CompanyReport }) {
+  const facts = report.websiteFacts?.facts ?? [];
+  const validation = report.websiteFacts?.validation;
+  const conflicts = validation?.conflicts ?? [];
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 text-sm md:grid-cols-[140px_1fr]">
+        <div className="text-gray-500">Źródło</div>
+        <div className="font-medium text-gray-900">
+          {report.websiteFacts?.url ? renderMaybeLink(report.websiteFacts.url) : <Empty />}
+        </div>
+        <div className="text-gray-500">Podsumowanie</div>
+        <div className="text-gray-700">{report.websiteFacts?.summary || <Empty />}</div>
+        {validation?.summary && (
+          <>
+            <div className="text-gray-500">Walidacja</div>
+            <div className="text-gray-700">{validation.summary}</div>
+          </>
+        )}
+      </div>
+
+      {facts.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full border-separate border-spacing-0 text-sm">
+            <thead>
+              <tr className="bg-gray-100 text-left text-gray-600">
+                <Header>Kategoria</Header>
+                <Header>Wartość</Header>
+                <Header>Fragment źródłowy</Header>
+                <Header>Pewność</Header>
+              </tr>
+            </thead>
+            <tbody>
+              {facts.map((fact, index) => (
+                <tr key={`${fact.category}-${fact.value}-${index}`} className="align-top">
+                  <Cell strong>{fact.label || fact.category}</Cell>
+                  <Cell>{fact.value}</Cell>
+                  <Cell>{fact.sourceQuote}</Cell>
+                  <Cell>{formatConfidence(fact.confidence)}</Cell>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <Empty />
+      )}
+
+      {conflicts.length > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+          <p className="mb-2 text-sm font-medium text-amber-900">Wykryte rozbieżności</p>
+          <ul className="space-y-1 text-sm text-amber-900">
+            {conflicts.map((conflict, index) => (
+              <li key={`${conflict.field}-${index}`}>
+                <strong>{conflict.field}:</strong> strona: {conflict.websiteValue || "brak"}, Perplexity:{" "}
+                {conflict.perplexityValue || "brak"} ({conflict.note})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -216,6 +286,12 @@ function formatRating(rating: number | null, count: number | null): string | nul
   return `${rating}/5${count !== null ? ` (${count} opinii)` : ""}`;
 }
 
+function formatConfidence(confidence: "high" | "medium" | "low"): string {
+  if (confidence === "high") return "wysoka";
+  if (confidence === "low") return "niska";
+  return "średnia";
+}
+
 function ReviewsList({
   title,
   reviews,
@@ -294,6 +370,8 @@ function DebugModal({ report, onClose }: { report: CompanyReport; onClose: () =>
                     title="Parsed report"
                     value={{
                       registry: report.registry,
+                      perplexityFacts: report.perplexityFacts,
+                      websiteFacts: report.websiteFacts,
                       digitalPresence: report.digitalPresence,
                       googlePlace: report.googlePlace,
                     }}

@@ -7,9 +7,14 @@ import {
 import { parseMarkdownTable, pickValue } from "@/lib/markdownTable";
 import { fetchGooglePlaceReportWithDebug } from "@/lib/places";
 import { fetchWebsiteDigitalPresence, mergeDigitalPresenceRows } from "@/lib/website";
-import type { CompanyRegistryRow, DigitalPresenceRow } from "@/lib/types";
+import {
+  buildWebsiteFactsPerplexityPrompt,
+  extractWebsiteFactsWithDebug,
+  validateWebsiteFactsWithGemini,
+} from "@/lib/websiteFacts";
+import type { CompanyRegistryRow, DigitalPresenceRow, PerplexityFactRow } from "@/lib/types";
 
-export const maxDuration = 90;
+export const maxDuration = 180;
 
 export async function POST(req: NextRequest) {
   let body: { nip?: string };
@@ -37,6 +42,16 @@ export async function POST(req: NextRequest) {
     }
 
     const officialWebsite = extractOfficialWebsite(registryResult.response, firstRegistryRow.name);
+    const websiteFactsResult = await extractWebsiteFactsWithDebug(officialWebsite);
+
+    const websiteFactsPerplexityPrompt = buildWebsiteFactsPerplexityPrompt(firstRegistryRow, {
+      nip,
+      officialWebsite,
+    });
+    const websiteFactsPerplexityResult = await askPerplexityTableWithDebug(websiteFactsPerplexityPrompt);
+    const websiteFactsPerplexityMarkdown = websiteFactsPerplexityResult.content;
+    const perplexityFactsRows = parsePerplexityFactRows(websiteFactsPerplexityMarkdown);
+
     const digitalPresencePrompt = buildDigitalPresencePrompt(firstRegistryRow.name, {
       officialWebsite,
       nip,
@@ -51,6 +66,19 @@ export async function POST(req: NextRequest) {
       perplexityDigitalRows,
       websitePresenceResult.rows
     );
+
+    const websiteFactsValidationResult = await validateWebsiteFactsWithGemini(websiteFactsResult, {
+      registryMarkdown,
+      websiteFactsMarkdown: websiteFactsPerplexityMarkdown,
+      digitalPresenceMarkdown,
+    });
+    const websiteFacts = {
+      url: websiteFactsResult.url,
+      textLength: websiteFactsResult.textLength,
+      facts: websiteFactsResult.facts,
+      summary: websiteFactsResult.summary,
+      validation: websiteFactsValidationResult.validation,
+    };
 
     const placesQuery = [firstRegistryRow.name, firstRegistryRow.address]
       .filter(Boolean)
@@ -68,11 +96,21 @@ export async function POST(req: NextRequest) {
         rawMarkdown: digitalPresenceMarkdown,
         rows: digitalPresenceRows,
       },
+      perplexityFacts: {
+        rawMarkdown: websiteFactsPerplexityMarkdown,
+        rows: perplexityFactsRows,
+      },
+      websiteFacts,
       googlePlace: googlePlaceResult.report,
       debug: {
         registryPrompt,
         registryResponse: registryMarkdown,
         registryRawResponse: registryResult.response,
+        websiteFactsPerplexityPrompt,
+        websiteFactsPerplexityResponse: websiteFactsPerplexityMarkdown,
+        websiteFactsPerplexityRawResponse: websiteFactsPerplexityResult.response,
+        websiteFactsRawResponse: websiteFactsResult.debug,
+        websiteFactsValidationRawResponse: websiteFactsValidationResult.debug,
         digitalPresencePrompt,
         digitalPresenceResponse: digitalPresenceMarkdown,
         digitalPresenceRawResponse: digitalPresenceResult.response,
@@ -88,9 +126,24 @@ export async function POST(req: NextRequest) {
             response: registryResult.response,
           },
           {
+            name: "Firecrawl + Gemini: fakty z oficjalnej strony",
+            request: websiteFactsResult.debug.scrapeRequest ?? { officialWebsite },
+            response: websiteFactsResult.debug,
+          },
+          {
+            name: "Perplexity: dane firmowe i kontaktowe",
+            request: websiteFactsPerplexityResult.request,
+            response: websiteFactsPerplexityResult.response,
+          },
+          {
             name: "Perplexity: strona i social media",
             request: digitalPresenceResult.request,
             response: digitalPresenceResult.response,
+          },
+          {
+            name: "Gemini: walidacja danych ze strony",
+            request: websiteFactsValidationResult.debug,
+            response: websiteFacts.validation,
           },
           {
             name: "Website fallback: linki ze strony firmowej",
@@ -258,5 +311,13 @@ function parseDigitalPresenceRows(markdown: string): DigitalPresenceRow[] {
       "Dodatkowe informacje",
       "Followers",
     ]),
+  }));
+}
+
+function parsePerplexityFactRows(markdown: string): PerplexityFactRow[] {
+  return parseMarkdownTable(markdown).map((row) => ({
+    category: pickValue(row, ["Kategoria"]),
+    value: pickValue(row, ["Wartość", "Wartosc", "Value"]),
+    source: pickValue(row, ["Źródło / Uwagi", "Zrodlo / Uwagi", "Źródło", "Zrodlo", "Uwagi"]),
   }));
 }

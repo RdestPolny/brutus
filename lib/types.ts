@@ -18,6 +18,46 @@ export interface DigitalPresenceRow {
   details: string;
 }
 
+export interface PerplexityFactRow {
+  category: string;
+  value: string;
+  source: string;
+}
+
+export interface WebsiteFact {
+  category: string;
+  label: string;
+  value: string;
+  sourceQuote: string;
+  confidence: "high" | "medium" | "low";
+}
+
+export interface WebsiteFactsValidation {
+  summary: string;
+  validatedFacts: Array<{
+    category: string;
+    value: string;
+    status: "confirmed" | "conflict" | "website_only" | "perplexity_only" | "unclear";
+    note: string;
+  }>;
+  conflicts: Array<{
+    field: string;
+    websiteValue: string;
+    perplexityValue: string;
+    note: string;
+  }>;
+  missingOnWebsite: string[];
+  missingInPerplexity: string[];
+}
+
+export interface WebsiteFactsReport {
+  url: string | null;
+  textLength: number;
+  facts: WebsiteFact[];
+  summary: string;
+  validation: WebsiteFactsValidation | null;
+}
+
 export interface GooglePlaceReport {
   name: string | null;
   mapsUrl: string | null;
@@ -62,11 +102,21 @@ export interface CompanyReport {
     rawMarkdown: string;
     rows: DigitalPresenceRow[];
   };
+  perplexityFacts: {
+    rawMarkdown: string;
+    rows: PerplexityFactRow[];
+  };
+  websiteFacts: WebsiteFactsReport;
   googlePlace: GooglePlaceReport;
   debug?: {
     registryPrompt: string;
     registryResponse: string;
     registryRawResponse: unknown;
+    websiteFactsPerplexityPrompt: string;
+    websiteFactsPerplexityResponse: string;
+    websiteFactsPerplexityRawResponse: unknown;
+    websiteFactsRawResponse: unknown;
+    websiteFactsValidationRawResponse: unknown;
     digitalPresencePrompt: string;
     digitalPresenceResponse: string;
     digitalPresenceRawResponse: unknown;
