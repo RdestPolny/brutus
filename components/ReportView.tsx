@@ -5,8 +5,19 @@ import type { CompanyReport } from "@/lib/types";
 
 export function ReportView({ report }: { report: CompanyReport }) {
   const [debugOpen, setDebugOpen] = useState(false);
-  const registry = report.registry.rows[0];
-  const place = report.googlePlace;
+  const registry = report.registry.rows[0] ?? null;
+  const businessRows = buildBusinessRows(report);
+  const structureRows = buildStructureRows(report);
+  const presenceRows = buildPresenceRows(report);
+  const websiteRows = buildWebsiteRows(report);
+  const hasFinancials =
+    report.goWork.pages.some((page) => page.financials.length > 0) ||
+    report.krs?.filings.length > 0;
+  const hasOpinions =
+    report.goWork.pages.some((page) => page.reviews.length > 0) ||
+    report.googlePlace.reviews.length > 0 ||
+    report.googlePlace.positiveReviews.length > 0 ||
+    report.googlePlace.negativeReviews.length > 0;
 
   return (
     <div className="space-y-6">
@@ -38,58 +49,45 @@ export function ReportView({ report }: { report: CompanyReport }) {
 
       <ExecutiveOverview report={report} />
 
-      <Section title="1. Dane rejestrowe">
-        <RegistryTable report={report} />
+      <Section title="1. Profil firmy">
+        <CompanyProfileSection report={report} />
       </Section>
 
-      <Section title="2. KRS OpenAPI">
-        <KrsSection report={report} />
-      </Section>
+      {businessRows.length > 0 && (
+        <Section title="2. Branża i model działania">
+          <BusinessSection report={report} rows={businessRows} />
+        </Section>
+      )}
 
-      <Section title="3. Dane z oficjalnej strony">
-        <WebsiteFactsSection report={report} />
-      </Section>
+      {structureRows.length > 0 && (
+        <Section title="3. Struktura i decyzje">
+          <StructureSection report={report} rows={structureRows} />
+        </Section>
+      )}
 
-      <Section title="4. Strona i social media">
-        <DigitalPresenceTable report={report} />
-      </Section>
+      {hasFinancials && (
+        <Section title="4. Finanse i dokumenty">
+          <FinancialSection report={report} />
+        </Section>
+      )}
 
-      <Section title="5. GoWork">
-        <GoWorkSection report={report} />
-      </Section>
+      {presenceRows.length > 0 && (
+        <Section title="5. Kontakt i obecność online">
+          <PresenceSection report={report} rows={presenceRows} />
+        </Section>
+      )}
 
-      <Section title="6. Wizytówka Google Maps">
-        <div className="grid gap-4 md:grid-cols-[1.2fr_1fr]">
-          <div className="space-y-3">
-            <InfoRow label="Nazwa" value={place.name} />
-            <InfoRow label="Adres" value={place.address} />
-            <InfoRow label="Ocena" value={formatRating(place.rating, place.reviewCount)} />
-            <InfoRow label="Telefon" value={place.nationalPhoneNumber} />
-            <InfoRow label="Strona" value={place.websiteUri} link />
-            <InfoRow label="Google Maps" value={place.mapsUrl} link />
-            <InfoRow label="Status" value={place.businessStatus} />
-          </div>
-          <div>
-            <p className="mb-2 text-sm font-medium text-gray-700">Godziny otwarcia</p>
-            {place.openingHours.length > 0 ? (
-              <ul className="space-y-1 text-sm text-gray-700">
-                {place.openingHours.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            ) : (
-              <Empty />
-            )}
-          </div>
-        </div>
+      {hasOpinions && (
+        <Section title="6. Opinie i reputacja">
+          <ReputationSection report={report} />
+        </Section>
+      )}
 
-        <div className="mt-5">
-          <div className="grid gap-5 lg:grid-cols-2">
-            <ReviewsList title="Pozytywne opinie" reviews={place.positiveReviews} tone="positive" />
-            <ReviewsList title="Negatywne opinie (1-3 gwiazdki)" reviews={place.negativeReviews} tone="negative" />
-          </div>
-        </div>
-      </Section>
+      {websiteRows.length > 0 && (
+        <Section title="7. Dodatkowe fakty ze strony">
+          <FactsTable rows={websiteRows} />
+        </Section>
+      )}
 
       {registry?.name && (
         <p className="text-xs text-gray-400 print:hidden">
@@ -110,6 +108,15 @@ function ExecutiveOverview({ report }: { report: CompanyReport }) {
   const googleSentiment = summarizeGoogleSentiment(googlePlace.reviews);
   const goWorkRating = calculateGoWorkRating(goWorkReviews);
   const latestFinancial = latestFinancialRow(financials);
+  const hasFinancialChart = financials.some((row) => row.year && (row.revenue || row.grossProfit));
+  const hasCards =
+    googlePlace.rating !== null ||
+    goWorkReviews.length > 0 ||
+    Boolean(latestFinancial?.revenue) ||
+    Boolean(latestFinancial?.grossProfit);
+  const hasSentiment = goWorkReviews.length > 0 || googlePlace.reviews.length > 0;
+
+  if (!hasCards && !hasFinancialChart && !hasSentiment) return null;
 
   return (
     <section className="rounded-lg border border-gray-200 bg-white p-4 md:p-5">
@@ -120,33 +127,533 @@ function ExecutiveOverview({ report }: { report: CompanyReport }) {
         </div>
       </div>
 
-      <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <RatingCard
-          title="Google Maps"
-          subtitle="klienci"
-          rating={googlePlace.rating}
-          count={googlePlace.reviewCount}
-          tone="blue"
-        />
-        <RatingCard
-          title="GoWork"
-          subtitle="pracownicy i kandydaci"
-          rating={goWorkRating.rating}
-          count={goWorkRating.count}
-          tone="red"
-        />
-        <FinancialMetricCard label={`Przychód ${latestFinancial?.year ?? ""}`} value={latestFinancial?.revenue || "brak"} tone="blue" />
-        <FinancialMetricCard label={`Zysk / strata ${latestFinancial?.year ?? ""}`} value={latestFinancial?.grossProfit || "brak"} tone="green" />
-      </div>
+      {hasCards && (
+        <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {googlePlace.rating !== null && (
+            <RatingCard
+              title="Google Maps"
+              subtitle="klienci"
+              rating={googlePlace.rating}
+              count={googlePlace.reviewCount}
+              tone="blue"
+            />
+          )}
+          {goWorkReviews.length > 0 && (
+            <RatingCard
+              title="GoWork"
+              subtitle="pracownicy i kandydaci"
+              rating={goWorkRating.rating}
+              count={goWorkRating.count}
+              tone="red"
+            />
+          )}
+          {latestFinancial?.revenue && (
+            <FinancialMetricCard label={`Przychód ${latestFinancial.year}`} value={latestFinancial.revenue} tone="blue" />
+          )}
+          {latestFinancial?.grossProfit && (
+            <FinancialMetricCard label={`Zysk / strata ${latestFinancial.year}`} value={latestFinancial.grossProfit} tone="green" />
+          )}
+        </div>
+      )}
 
-      <FinancialChart financials={financials} />
+      {hasFinancialChart && <FinancialChart financials={financials} />}
 
-      <div className="mt-5 grid gap-3 lg:grid-cols-2">
-        <SentimentCard title="Sentyment GoWork" value={goWorkSentiment} />
-        <SentimentCard title="Sentyment Google Maps" value={googleSentiment} />
-      </div>
+      {hasSentiment && (
+        <div className="mt-5 grid gap-3 lg:grid-cols-2">
+          {goWorkReviews.length > 0 && <SentimentCard title="Sentyment GoWork" value={goWorkSentiment} />}
+          {googlePlace.reviews.length > 0 && <SentimentCard title="Sentyment Google Maps" value={googleSentiment} />}
+        </div>
+      )}
     </section>
   );
+}
+
+type FactRow = {
+  category: string;
+  label: string;
+  value: string;
+};
+
+function CompanyProfileSection({ report }: { report: CompanyReport }) {
+  const rows = buildProfileRows(report);
+
+  return (
+    <div className="space-y-5">
+      <FactsTable rows={rows} />
+      {report.krs?.status && report.krs.status !== "found" && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          KRS OpenAPI: {formatKrsStatus(report.krs.status)}
+          {report.krs.message ? ` - ${report.krs.message}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BusinessSection({ report, rows }: { report: CompanyReport; rows: FactRow[] }) {
+  const activities = uniqueActivities(report.krs?.activities ?? []);
+
+  return (
+    <div className="space-y-5">
+      <FactsTable rows={rows} />
+      {activities.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-900">PKD</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-0 text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left text-gray-600">
+                  <Header>Typ</Header>
+                  <Header>Kod</Header>
+                  <Header>Opis</Header>
+                </tr>
+              </thead>
+              <tbody>
+                {activities.slice(0, 16).map((activity, index) => (
+                  <tr key={`${activity.code}-${activity.description}-${index}`} className="align-top">
+                    <Cell strong>{activity.isMain ? "przeważająca" : "pozostała"}</Cell>
+                    <Cell>{activity.code}</Cell>
+                    <Cell>{activity.description}</Cell>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StructureSection({ report, rows }: { report: CompanyReport; rows: FactRow[] }) {
+  return (
+    <div className="space-y-5">
+      <FactsTable rows={rows} />
+      <div className="grid gap-5 lg:grid-cols-2">
+        {report.krs?.boardMembers.length > 0 && (
+          <PeopleTable title="Zarząd / reprezentacja" people={report.krs.boardMembers} />
+        )}
+        {report.krs?.supervisoryBoardMembers.length > 0 && (
+          <PeopleTable title="Rada nadzorcza / organ nadzoru" people={report.krs.supervisoryBoardMembers} />
+        )}
+      </div>
+      {report.krs?.shareholders.length > 0 && (
+        <FactsTable title="Struktura własnościowa" rows={krsFactsToRows(report.krs.shareholders)} />
+      )}
+      {report.krs?.branches.length > 0 && (
+        <FactsTable title="Oddziały / obszar działania" rows={krsFactsToRows(report.krs.branches)} />
+      )}
+      {report.krs?.transformations.length > 0 && (
+        <FactsTable title="Fuzje, przejęcia, przekształcenia" rows={krsFactsToRows(report.krs.transformations)} />
+      )}
+    </div>
+  );
+}
+
+function FinancialSection({ report }: { report: CompanyReport }) {
+  const financials = uniqueFinancials(report.goWork.pages.flatMap((page) => page.financials));
+  const filings = uniqueFilings(report.krs?.filings ?? []);
+
+  return (
+    <div className="space-y-5">
+      {financials.length > 0 && <FinancialChart financials={financials} />}
+
+      {financials.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-900">Przychody i wynik</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-0 text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left text-gray-600">
+                  <Header>Rok</Header>
+                  <Header>Przychód netto</Header>
+                  <Header>Zysk / strata brutto</Header>
+                </tr>
+              </thead>
+              <tbody>
+                {financials.map((row, index) => (
+                  <tr key={`${row.year}-${index}`} className="align-top">
+                    <Cell strong>{row.year}</Cell>
+                    <Cell>{row.revenue}</Cell>
+                    <Cell>{row.grossProfit}</Cell>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {filings.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-900">Dokumenty finansowe złożone w KRS</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-0 text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left text-gray-600">
+                  <Header>Dokument</Header>
+                  <Header>Data złożenia</Header>
+                  <Header>Okres</Header>
+                </tr>
+              </thead>
+              <tbody>
+                {filings.slice(0, 12).map((filing, index) => (
+                  <tr key={`${filing.type}-${filing.period}-${index}`} className="align-top">
+                    <Cell strong>{filing.type}</Cell>
+                    <Cell>{filing.filedAt}</Cell>
+                    <Cell>{filing.period}</Cell>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PresenceSection({ report, rows }: { report: CompanyReport; rows: FactRow[] }) {
+  const digitalRows = uniqueDigitalRows(report.digitalPresence.rows);
+  const openingHours = uniqueStrings(report.googlePlace.openingHours);
+
+  return (
+    <div className="space-y-5">
+      <FactsTable rows={rows} />
+
+      {digitalRows.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-900">Kanały online</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-0 text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-left text-gray-600">
+                  <Header>Platforma</Header>
+                  <Header>Adres</Header>
+                  <Header>Informacje</Header>
+                </tr>
+              </thead>
+              <tbody>
+                {digitalRows.map((row, index) => (
+                  <tr key={`${row.platform}-${row.address}-${index}`} className="align-top">
+                    <Cell strong>{row.platform}</Cell>
+                    <Cell>{renderMaybeLink(row.address)}</Cell>
+                    <Cell>{row.details}</Cell>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {openingHours.length > 0 && (
+        <div>
+          <p className="mb-2 text-sm font-medium text-gray-900">Godziny otwarcia</p>
+          <ul className="grid gap-1 text-sm text-gray-700 md:grid-cols-2">
+            {openingHours.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReputationSection({ report }: { report: CompanyReport }) {
+  const place = report.googlePlace;
+  const goWorkReviews = report.goWork.pages.flatMap((page) => page.reviews);
+
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 sm:grid-cols-2">
+        {place.rating !== null && (
+          <RatingCard title="Google Maps" subtitle="klienci" rating={place.rating} count={place.reviewCount} tone="blue" />
+        )}
+        {goWorkReviews.length > 0 && (
+          <RatingCard
+            title="GoWork"
+            subtitle="pracownicy i kandydaci"
+            rating={calculateGoWorkRating(goWorkReviews).rating}
+            count={calculateGoWorkRating(goWorkReviews).count}
+            tone="red"
+          />
+        )}
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        {goWorkReviews.length > 0 && <SentimentCard title="Sentyment GoWork" value={summarizeGoWorkSentiment(goWorkReviews)} />}
+        {place.reviews.length > 0 && <SentimentCard title="Sentyment Google Maps" value={summarizeGoogleSentiment(place.reviews)} />}
+      </div>
+
+      {goWorkReviews.length > 0 && <GoWorkReviewsTable reviews={goWorkReviews} />}
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        {place.positiveReviews.length > 0 && (
+          <ReviewsList title="Pozytywne opinie Google" reviews={place.positiveReviews} tone="positive" />
+        )}
+        {place.negativeReviews.length > 0 && (
+          <ReviewsList title="Negatywne opinie Google" reviews={place.negativeReviews} tone="negative" />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GoWorkReviewsTable({
+  reviews,
+}: {
+  reviews: Array<{
+    author: string;
+    date: string;
+    type: string;
+    sentiment: "positive" | "negative" | "neutral" | "unknown";
+    text: string;
+    companyReply: string;
+  }>;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-sm font-medium text-gray-900">Opinie i wpisy GoWork</p>
+      <div className="overflow-x-auto">
+        <table className="min-w-full border-separate border-spacing-0 text-sm">
+          <thead>
+            <tr className="bg-gray-100 text-left text-gray-600">
+              <Header>Data</Header>
+              <Header>Autor</Header>
+              <Header>Typ</Header>
+              <Header>Wydźwięk</Header>
+              <Header>Treść</Header>
+              <Header>Odpowiedź firmy</Header>
+            </tr>
+          </thead>
+          <tbody>
+            {reviews.map((review, index) => (
+              <tr key={`${review.date}-${review.author}-${index}`} className="align-top">
+                <Cell>{review.date}</Cell>
+                <Cell strong>{review.author}</Cell>
+                <Cell>{review.type}</Cell>
+                <Cell>{formatSentiment(review.sentiment)}</Cell>
+                <Cell>{review.text}</Cell>
+                <Cell>{review.companyReply}</Cell>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function FactsTable({ rows, title }: { rows: FactRow[]; title?: string }) {
+  const visibleRows = uniqueFactRows(rows);
+  if (visibleRows.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {title && <p className="text-sm font-medium text-gray-900">{title}</p>}
+      <div className="overflow-x-auto">
+        <table className="min-w-full border-separate border-spacing-0 text-sm">
+          <thead>
+            <tr className="bg-gray-100 text-left text-gray-600">
+              <Header>Kategoria</Header>
+              <Header>Informacja</Header>
+              <Header>Wartość</Header>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleRows.map((row, index) => (
+              <tr key={`${row.category}-${row.label}-${index}`} className="align-top">
+                <Cell>{row.category}</Cell>
+                <Cell strong>{row.label}</Cell>
+                <Cell>{renderMaybeLink(row.value)}</Cell>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function buildProfileRows(report: CompanyReport): FactRow[] {
+  const registry = report.registry.rows[0];
+  return uniqueFactRows([
+    row("Identyfikacja", "Nazwa", registry?.name || getKrsFact(report, "Nazwa")),
+    row("Identyfikacja", "NIP", registry?.nip || getKrsFact(report, "NIP")),
+    row("Identyfikacja", "REGON", registry?.regon || getKrsFact(report, "REGON")),
+    row("Identyfikacja", "KRS", registry?.krs || report.krs?.krs || getKrsFact(report, "KRS")),
+    row("Rejestr", "Forma prawna", registry?.legalForm || getKrsFact(report, "Forma prawna")),
+    row("Rejestr", "Data rejestracji w KRS", registry?.registrationDate || getKrsFact(report, "Data rejestracji w KRS")),
+    row("Rejestr", "Kapitał zakładowy", registry?.shareCapital || getKrsFact(report, "Kapitał zakładowy")),
+    row("Adres", "Siedziba", getKrsFact(report, "Siedziba")),
+    row("Adres", "Adres rejestrowy", registry?.address || getKrsFact(report, "Adres")),
+    row("Kontakt", "Strona WWW", firstValue(getKrsFact(report, "WWW według KRS"), report.websiteFacts?.url, report.googlePlace.websiteUri)),
+    row("Zmiany", "Ostatni wpis KRS", [
+      getKrsFact(report, "Data ostatniego wpisu"),
+      getKrsFact(report, "Sygnatura ostatniego wpisu"),
+    ].filter(Boolean).join(" - ")),
+  ]);
+}
+
+function buildBusinessRows(report: CompanyReport): FactRow[] {
+  const registry = report.registry.rows[0];
+  const websiteFacts = report.websiteFacts?.facts ?? [];
+  const selectedWebsiteFacts = websiteFacts.filter((fact) =>
+    includesAny(`${fact.category} ${fact.label}`, ["branża", "specjalizacja", "model", "rynek", "obszar", "produkt", "usług"])
+  );
+
+  return uniqueFactRows([
+    row("Branża", "Główna działalność", registry?.mainActivity),
+    ...krsFactsToRows(report.krs?.facts.filter((fact) =>
+      ["Czas na jaki utworzono podmiot", "Sposób powstania", "Opis powstania"].includes(fact.label)
+    ) ?? []),
+    ...selectedWebsiteFacts.map((fact) => row(fact.category || "Strona firmowa", fact.label || fact.category, fact.value)),
+  ]);
+}
+
+function buildStructureRows(report: CompanyReport): FactRow[] {
+  const krsFacts = report.krs?.facts ?? [];
+  return uniqueFactRows([
+    ...krsFactsToRows(krsFacts.filter((fact) =>
+      ["Sposób reprezentacji", "Liczba akcji/udziałów", "Wartość jednej akcji/udziału"].includes(fact.label)
+    )),
+    ...krsFactsToRows(report.krs?.recentChanges ?? []),
+  ]);
+}
+
+function buildPresenceRows(report: CompanyReport): FactRow[] {
+  const place = report.googlePlace;
+  return uniqueFactRows([
+    row("Kontakt", "Telefon", place.nationalPhoneNumber),
+    row("Kontakt", "Strona WWW", firstValue(report.websiteFacts?.url, place.websiteUri, getKrsFact(report, "WWW według KRS"))),
+    row("Kontakt", "Google Maps", place.mapsUrl),
+    row("Lokalizacja", "Nazwa w Google Maps", place.name),
+    row("Lokalizacja", "Adres Google Maps", place.address),
+    row("Lokalizacja", "Status Google", place.businessStatus),
+    row("Reputacja", "Ocena Google Maps", formatRating(place.rating, place.reviewCount)),
+  ]);
+}
+
+function buildWebsiteRows(report: CompanyReport): FactRow[] {
+  const alreadyShown = new Set([
+    "branża",
+    "specjalizacja",
+    "model",
+    "rynek",
+    "obszar",
+    "produkt",
+    "usług",
+  ]);
+  return uniqueFactRows(
+    (report.websiteFacts?.facts ?? [])
+      .filter((fact) => !Array.from(alreadyShown).some((term) => `${fact.category} ${fact.label}`.toLowerCase().includes(term)))
+      .map((fact) => row(fact.category || "Strona firmowa", fact.label || fact.category, fact.value))
+  );
+}
+
+function krsFactsToRows(facts: Array<{ category: string; label: string; value: string }>): FactRow[] {
+  return facts.map((fact) => row(fact.category, fact.label, fact.value)).filter((item): item is FactRow => Boolean(item));
+}
+
+function row(category: string, label: string, value: string | null | undefined): FactRow | null {
+  const cleaned = cleanValue(value);
+  return cleaned ? { category, label, value: cleaned } : null;
+}
+
+function uniqueFactRows(rows: Array<FactRow | null | undefined>): FactRow[] {
+  const seenLabels = new Set<string>();
+  const seenValues = new Set<string>();
+  const result: FactRow[] = [];
+
+  for (const row of rows) {
+    if (!row?.value) continue;
+    const labelKey = normalizeForCompare(`${row.category}:${row.label}`);
+    const valueKey = normalizeForCompare(row.value);
+    if (seenLabels.has(labelKey) || seenValues.has(valueKey)) continue;
+    seenLabels.add(labelKey);
+    seenValues.add(valueKey);
+    result.push(row);
+  }
+
+  return result;
+}
+
+function uniqueActivities(activities: Array<{ code: string; description: string; isMain: boolean }>) {
+  const seen = new Set<string>();
+  return activities.filter((activity) => {
+    const key = normalizeForCompare(`${activity.code}:${activity.description}`);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniqueDigitalRows(rows: CompanyReport["digitalPresence"]["rows"]) {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    if (!row.platform && !row.address && !row.details) return false;
+    const key = normalizeForCompare(`${row.platform}:${row.address}`);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniqueFinancials(rows: Array<{ year: string; revenue: string; grossProfit: string }>) {
+  const seen = new Set<string>();
+  return rows
+    .filter((row) => row.year && (row.revenue || row.grossProfit))
+    .filter((row) => {
+      const key = normalizeForCompare(`${row.year}:${row.revenue}:${row.grossProfit}`);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function uniqueFilings(rows: CompanyReport["krs"]["filings"]) {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = normalizeForCompare(`${row.type}:${row.filedAt}:${row.period}`);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const key = normalizeForCompare(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function getKrsFact(report: CompanyReport, label: string): string {
+  return report.krs?.facts.find((fact) => fact.label === label)?.value ?? "";
+}
+
+function firstValue(...values: Array<string | null | undefined>): string {
+  return values.map(cleanValue).find(Boolean) ?? "";
+}
+
+function cleanValue(value: string | null | undefined): string {
+  const cleaned = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!cleaned || cleaned === "-" || cleaned.toLowerCase() === "brak danych") return "";
+  return cleaned;
+}
+
+function normalizeForCompare(value: string): string {
+  return cleanValue(value).toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/[.,;:()\s]+/g, " ").trim();
+}
+
+function includesAny(value: string, patterns: string[]): boolean {
+  const normalized = value.toLowerCase();
+  return patterns.some((pattern) => normalized.includes(pattern));
 }
 
 function FinancialChart({ financials }: { financials: Array<{ year: string; revenue: string; grossProfit: string }> }) {
