@@ -6,6 +6,7 @@ import type { CompanyReport } from "@/lib/types";
 export function ReportView({ report }: { report: CompanyReport }) {
   const [debugOpen, setDebugOpen] = useState(false);
   const registry = report.registry.rows[0] ?? null;
+  const reportTitle = registry?.name || report.input.companyName || `NIP ${report.input.nip}`;
   const businessRows = buildBusinessRows(report);
   const structureRows = buildStructureRows(report);
   const presenceRows = buildPresenceRows(report);
@@ -24,7 +25,8 @@ export function ReportView({ report }: { report: CompanyReport }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm text-gray-500">Raport dla firmy</p>
-          <h2 className="text-2xl font-semibold tracking-tight text-gray-950">{report.input.companyName}</h2>
+          <h2 className="text-2xl font-semibold tracking-tight text-gray-950">{reportTitle}</h2>
+          <p className="mt-1 text-sm text-gray-500">NIP: {report.input.nip}</p>
           <p className="mt-1 text-sm text-gray-500">
             Wygenerowano: {new Date(report.generatedAt).toLocaleString("pl-PL")}
           </p>

@@ -5,7 +5,7 @@ import { ReportView } from "@/components/ReportView";
 import type { CompanyReport } from "@/lib/types";
 
 export default function Home() {
-  const [companyName, setCompanyName] = useState("");
+  const [nip, setNip] = useState("");
   const [report, setReport] = useState<CompanyReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -20,7 +20,7 @@ export default function Home() {
       const res = await fetch("/api/brief", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyName }),
+        body: JSON.stringify({ nip }),
       });
 
       const text = await res.text();
@@ -40,20 +40,22 @@ export default function Home() {
       <div className="mx-auto max-w-6xl px-4 py-8">
         <header className="mb-6">
           <h1 className="text-3xl font-semibold tracking-tight text-gray-950">Prezesol</h1>
-          <p className="mt-1 text-sm text-gray-500">Raport firmowy po nazwie firmy</p>
+          <p className="mt-1 text-sm text-gray-500">Raport firmowy po NIP</p>
         </header>
 
         <section className="mb-8 rounded-lg border border-gray-200 bg-white p-5">
           <form onSubmit={handleSubmit} className="flex flex-col gap-3 md:flex-row md:items-end">
             <div className="flex-1">
-              <label htmlFor="companyName" className="mb-1 block text-sm font-medium text-gray-700">
-                Nazwa firmy
+              <label htmlFor="nip" className="mb-1 block text-sm font-medium text-gray-700">
+                NIP
               </label>
               <input
-                id="companyName"
-                value={companyName}
-                onChange={(event) => setCompanyName(event.target.value)}
-                placeholder="np. Strategiczni.pl"
+                id="nip"
+                value={nip}
+                onChange={(event) => setNip(event.target.value)}
+                inputMode="numeric"
+                autoComplete="off"
+                placeholder="np. 5250007425"
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-900 focus:ring-2 focus:ring-gray-900/10"
               />
             </div>
@@ -67,7 +69,7 @@ export default function Home() {
           </form>
           {loading && (
             <p className="mt-3 text-sm text-gray-500">
-              Szukam profilu GoWork, pobieram odpis KRS, scrapuję dane przez Firecrawl i uzupełniam stronę oraz social media.
+              Szukam profilu GoWork po NIP, pobieram odpis KRS, scrapuję dane przez Firecrawl i uzupełniam stronę oraz social media.
             </p>
           )}
         </section>

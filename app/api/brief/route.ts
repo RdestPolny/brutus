@@ -14,7 +14,7 @@ import type { CompanyRegistryRow, DigitalPresenceRow, GoWorkReport, KrsReport, P
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
-  let body: { companyName?: string };
+  let body: { nip?: string };
 
   try {
     body = await req.json();
@@ -22,34 +22,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 });
   }
 
-  const companyName = String(body.companyName ?? "").trim().replace(/\s+/g, " ");
-  if (companyName.length < 2) {
-    return NextResponse.json({ error: "Podaj nazwę firmy" }, { status: 400 });
+  const nip = normalizeNip(body.nip);
+  if (!nip) {
+    return NextResponse.json({ error: "Podaj poprawny NIP (10 cyfr)" }, { status: 400 });
   }
 
   try {
-    const goWorkSeedCompany = buildSeedCompany(companyName);
-    const goWorkResult = await fetchGoWorkReportWithDebug(goWorkSeedCompany, {});
+    const goWorkSeedCompany = buildSeedCompany(nip);
+    const goWorkResult = await fetchGoWorkReportWithDebug(goWorkSeedCompany, { nip });
     const goWork = {
       profileUrl: goWorkResult.profileUrl,
       searchRawMarkdown: goWorkResult.searchRawMarkdown,
       pages: goWorkResult.pages,
     };
 
-    const goWorkRegistryRows = buildRegistryRowsFromGoWork(companyName, goWork);
+    const goWorkRegistryRows = buildRegistryRowsFromGoWork(nip, goWork);
     const krsSeedRow = goWorkRegistryRows[0];
 
-    if (!krsSeedRow?.name) {
-      throw new Error("Nie udało się odczytać nazwy firmy z GoWork");
-    }
-
-    const krsResult = await fetchKrsReportWithDebug(krsSeedRow.krs);
+    const krsResult = await fetchKrsReportWithDebug(krsSeedRow?.krs ?? "");
     const registryRows = mergeRegistryRowsWithKrs(goWorkRegistryRows, krsResult.report);
     const firstRegistryRow = registryRows[0];
 
-    const digitalPresencePrompt = buildDigitalPresencePrompt(firstRegistryRow.name, {
+    const digitalPresencePrompt = buildDigitalPresencePrompt(nip, {
       officialWebsite: extractWebsiteFromKrs(krsResult.report) ?? extractWebsiteFromGoWork(goWork),
-      nip: firstRegistryRow.nip || undefined,
       krs: firstRegistryRow.krs || undefined,
     });
     const digitalPresenceResult = await askPerplexityTableWithDebug(digitalPresencePrompt);
@@ -74,13 +69,13 @@ export async function POST(req: NextRequest) {
       validation: null,
     };
 
-    const placesQuery = [firstRegistryRow.name, firstRegistryRow.address]
+    const placesQuery = [firstRegistryRow.name || nip, firstRegistryRow.address]
       .filter(Boolean)
       .join(" ");
     const googlePlaceResult = await fetchGooglePlaceReportWithDebug(placesQuery);
 
     return NextResponse.json({
-      input: { companyName, nip: firstRegistryRow.nip || undefined },
+      input: { nip, companyName: firstRegistryRow.name || undefined },
       generatedAt: new Date().toISOString(),
       registry: {
         rawMarkdown: goWork.searchRawMarkdown,
@@ -151,6 +146,11 @@ export async function POST(req: NextRequest) {
   }
 }
 
+function normalizeNip(value: unknown): string | null {
+  const digits = String(value ?? "").replace(/\D/g, "");
+  return /^\d{10}$/.test(digits) ? digits : null;
+}
+
 function extractOfficialWebsite(response: unknown, companyName: string): string | null {
   const raw = response as {
     citations?: string[];
@@ -216,10 +216,10 @@ function extractOfficialWebsite(response: unknown, companyName: string): string 
   return best && best.score >= 5 ? best.url : null;
 }
 
-function buildSeedCompany(companyName: string): CompanyRegistryRow {
+function buildSeedCompany(nip: string): CompanyRegistryRow {
   return {
-    name: companyName,
-    nip: "",
+    name: "",
+    nip,
     regon: "",
     krs: "",
     address: "",
@@ -232,12 +232,12 @@ function buildSeedCompany(companyName: string): CompanyRegistryRow {
   };
 }
 
-function buildRegistryRowsFromGoWork(companyName: string, goWork: GoWorkReport): CompanyRegistryRow[] {
+function buildRegistryRowsFromGoWork(inputNip: string, goWork: GoWorkReport): CompanyRegistryRow[] {
   const rows = goWork.pages.flatMap((page) => page.rows);
   const reviews = goWork.pages.flatMap((page) => page.reviews);
   const financials = goWork.pages.flatMap((page) => page.financials);
-  const name = findGoWorkValue(rows, ["nazwa", "firma", "profil"]) || companyName;
-  const nip = findNumericGoWorkValue(rows, ["nip"], /\b\d{10}\b/);
+  const name = findGoWorkValue(rows, ["nazwa", "firma", "profil"]);
+  const nip = findNumericGoWorkValue(rows, ["nip"], /\b\d{10}\b/) || inputNip;
   const krs = findNumericGoWorkValue(rows, ["krs"], /\b\d{10}\b/);
   const regon = findNumericGoWorkValue(rows, ["regon"], /\b\d{9,14}\b/);
   const latestFinancials = financials.find((row) => row.revenue || row.grossProfit);

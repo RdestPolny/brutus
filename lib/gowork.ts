@@ -10,9 +10,10 @@ export async function fetchGoWorkReportWithDebug(
   company: CompanyRegistryRow,
   _context?: { nip?: string; krs?: string }
 ): Promise<GoWorkReport & { debug: GoWorkDebug }> {
-  const searchQuery = buildGoWorkSearchQuery(company.name);
+  const searchTerm = company.nip || company.name;
+  const searchQuery = buildGoWorkSearchQuery(searchTerm);
   const searchResult = await searchFirecrawlWithDebug(searchQuery, { limit: 10, country: "PL" });
-  const profileUrl = extractGoWorkProfileUrl(searchResult.results, company.name);
+  const profileUrl = extractGoWorkProfileUrl(searchResult.results, searchTerm);
 
   if (!profileUrl) {
     return {
@@ -93,8 +94,8 @@ export async function fetchGoWorkReportWithDebug(
   };
 }
 
-function buildGoWorkSearchQuery(companyName: string): string {
-  return `${deriveShortBrandName(companyName)} gowork`;
+function buildGoWorkSearchQuery(searchTerm: string): string {
+  return `${deriveShortBrandName(searchTerm)} gowork`;
 }
 
 function deriveShortBrandName(companyName: string): string {

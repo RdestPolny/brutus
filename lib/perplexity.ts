@@ -66,37 +66,41 @@ function parseJsonOrRawText(rawText: string): unknown {
 }
 
 export function buildRegistryPrompt(nip: string): string {
-  return `Nip firmy: ${nip}, podaj Nazwę, KRS, adres, formę prawną, kapitał zakładowy, datę rejestracji i główną działalność. W tabeli, bez dodatkowego komentarza.
+  return `NIP firmy: ${nip}, podaj Nazwę, KRS, adres, formę prawną, kapitał zakładowy, datę rejestracji i główną działalność. W tabeli, bez dodatkowego komentarza.
 Tabela musi mieć dokładnie kolumny: Nazwa | KRS | Adres | Forma prawna | Kapitał zakładowy | Data rejestracji | Główna działalność.`;
 }
 
 export function buildDigitalPresencePrompt(
-  companyName: string,
-  context?: { officialWebsite?: string | null; nip?: string; krs?: string }
+  nip: string,
+  context?: { officialWebsite?: string | null; krs?: string }
 ): string {
-  const brandName = deriveBrandName(companyName, context?.officialWebsite);
+  const brandName = context?.officialWebsite ? deriveBrandName("", context.officialWebsite) : "";
   const websiteLine = context?.officialWebsite
     ? `Oficjalna strona ustalona w pierwszym kroku: ${context.officialWebsite}.`
     : "Jeśli znajdziesz oficjalną stronę, użyj jej jako punktu odniesienia.";
   const registryLine = [
-    context?.nip && `NIP: ${context.nip}`,
+    `NIP: ${nip}`,
     context?.krs && `KRS: ${context.krs}`,
   ]
     .filter(Boolean)
     .join(", ");
+  const brandSearchLine = brandName
+    ? `Dodatkowo sprawdź wariant domenowy/brandowy wynikający z oficjalnej strony: "${brandName}".`
+    : "Jeśli nie masz oficjalnej domeny, oprzyj wyszukiwanie na NIP.";
 
-  return `${companyName} (${brandName}) - poszukaj strony internetowej i linków do social mediów tej firmy.
+  return `NIP firmy: ${nip} - poszukaj strony internetowej i linków do social mediów tej firmy.
 ${websiteLine}
 ${registryLine ? `${registryLine}.` : ""}
 
-Wykonaj osobne wyszukiwania dla wariantów nazwy: "${companyName}", "${brandName}" oraz domeny z oficjalnej strony.
+Wykonaj osobne wyszukiwania dla identyfikatora NIP: "${nip}" oraz domeny z oficjalnej strony.
+${brandSearchLine}
 Nie ograniczaj się do wyników z oficjalnej strony. Sprawdź zewnętrzne platformy, szczególnie:
-- site:facebook.com "${brandName}"
-- site:instagram.com "${brandName}"
-- site:linkedin.com/company "${brandName}"
-- site:youtube.com "${brandName}"
-- site:tiktok.com "${brandName}"
-- site:x.com OR site:twitter.com "${brandName}"
+- site:facebook.com "${nip}"
+- site:instagram.com "${nip}"
+- site:linkedin.com/company "${nip}"
+- site:youtube.com "${nip}"
+- site:tiktok.com "${nip}"
+- site:x.com OR site:twitter.com "${nip}"
 
 Przygotuj tabelę Markdown z kolumnami dokładnie:
 Platforma | Adres | Liczba followersów / Dodatkowe informacje
