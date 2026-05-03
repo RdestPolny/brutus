@@ -1,10 +1,22 @@
-import { scrapeCleanHtmlWithDebug, searchFirecrawlWithDebug, type FirecrawlSearchResult } from "./firecrawl";
+import { scrapeReadableContentWithDebug, searchFirecrawlWithDebug, type FirecrawlSearchResult } from "./firecrawl";
 import { askGeminiJsonWithDebug } from "./gemini";
-import { htmlToEssentialText } from "./htmlText";
+import { htmlToEssentialText, markdownToEssentialText } from "./htmlText";
 import type { CompanyRegistryRow, GoWorkFinancialRow, GoWorkReport, GoWorkReview, GoWorkRow } from "./types";
 
 const MAX_GOWORK_PAGES = 5;
 const GOWORK_HOST = "gowork.pl";
+const GOWORK_SCRAPE_OPTIONS = {
+  formats: ["markdown", "links"] as const,
+  onlyMainContent: true,
+  maxAge: 6 * 60 * 60 * 1000,
+  waitFor: 1500,
+  timeout: 60000,
+  location: {
+    country: "PL",
+    languages: ["pl-PL", "pl"],
+  },
+  proxy: "auto" as const,
+};
 
 export async function fetchGoWorkReportWithDebug(
   company: CompanyRegistryRow,
@@ -30,13 +42,13 @@ export async function fetchGoWorkReportWithDebug(
     };
   }
 
-  const profileScrape = await scrapeCleanHtmlWithDebug(profileUrl);
-  const pageUrls = discoverGoWorkPageUrls(profileUrl, profileScrape.html);
+  const profileScrape = await scrapeReadableContentWithDebug(profileUrl, GOWORK_SCRAPE_OPTIONS);
+  const pageUrls = discoverGoWorkPageUrls(profileUrl, profileScrape);
   const additionalUrls = pageUrls.filter((url) => url !== profileUrl).slice(0, MAX_GOWORK_PAGES - 1);
   const additionalScrapes = await Promise.all(
     additionalUrls.map(async (url) => ({
       url,
-      scrape: await scrapeCleanHtmlWithDebug(url),
+      scrape: await scrapeReadableContentWithDebug(url, GOWORK_SCRAPE_OPTIONS),
     }))
   );
 
@@ -47,7 +59,7 @@ export async function fetchGoWorkReportWithDebug(
 
   const extractedPages = await Promise.all(
     scrapedPages.map(async ({ url, scrape }) => {
-      const text = htmlToEssentialText(scrape.html);
+      const text = scrape.markdown ? markdownToEssentialText(scrape.markdown) : htmlToEssentialText(scrape.html);
       const extraction = await askGeminiJsonWithDebug<GoWorkPageExtraction>(
         buildGoWorkExtractionPrompt(url, text),
         {
@@ -201,14 +213,24 @@ function goWorkMatchTokens(companyName: string): string[] {
     .filter((token) => token.length >= 3);
 }
 
-function discoverGoWorkPageUrls(profileUrl: string, html: string): string[] {
+function discoverGoWorkPageUrls(
+  profileUrl: string,
+  scrape: { links: string[]; markdown: string; html: string }
+): string[] {
   const urls = new Set<string>([normalizeGoWorkUrl(profileUrl)]);
   const profileId = extractGoWorkProfileId(profileUrl);
   const hrefRegex = /href=["']([^"']+)["']/gi;
   const canonicalRegex = /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["'][^>]*>/i;
-  const canonical = html.match(canonicalRegex)?.[1];
+  const canonical = scrape.html.match(canonicalRegex)?.[1];
 
-  for (const rawHref of [canonical, ...extractRegexMatches(html, hrefRegex)]) {
+  const candidates = [
+    canonical,
+    ...scrape.links,
+    ...extractMarkdownUrls(scrape.markdown),
+    ...extractRegexMatches(scrape.html, hrefRegex),
+  ];
+
+  for (const rawHref of candidates) {
     if (!rawHref) continue;
     try {
       const url = new URL(rawHref, profileUrl);
@@ -232,6 +254,13 @@ function discoverGoWorkPageUrls(profileUrl: string, html: string): string[] {
   }
 
   return Array.from(urls).slice(0, MAX_GOWORK_PAGES);
+}
+
+function extractMarkdownUrls(markdown: string): string[] {
+  return [
+    ...extractRegexMatches(markdown, /\]\(([^)]+)\)/g),
+    ...extractRegexMatches(markdown, /((?:https?:\/\/)?(?:www\.)?gowork\.pl\/[^\s|)\]]+)/gi),
+  ];
 }
 
 function extractRegexMatches(value: string, regex: RegExp): string[] {

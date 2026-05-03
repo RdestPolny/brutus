@@ -1,6 +1,6 @@
-import { scrapeCleanHtmlWithDebug } from "./firecrawl";
+import { scrapeReadableContentWithDebug } from "./firecrawl";
 import { askGeminiJsonWithDebug } from "./gemini";
-import { htmlToEssentialText } from "./htmlText";
+import { htmlToEssentialText, markdownToEssentialText } from "./htmlText";
 import type { CompanyRegistryRow, WebsiteFactsReport, WebsiteFactsValidation } from "./types";
 
 export async function extractWebsiteFactsWithDebug(
@@ -17,8 +17,12 @@ export async function extractWebsiteFactsWithDebug(
     };
   }
 
-  const scrape = await scrapeCleanHtmlWithDebug(officialWebsite);
-  const text = htmlToEssentialText(scrape.html);
+  const scrape = await scrapeReadableContentWithDebug(officialWebsite, {
+    formats: ["markdown"],
+    onlyMainContent: true,
+    timeout: 60000,
+  });
+  const text = scrape.markdown ? markdownToEssentialText(scrape.markdown) : htmlToEssentialText(scrape.html);
   const extractionPrompt = buildWebsiteFactsExtractionPrompt(officialWebsite, text);
   const extraction = await askGeminiJsonWithDebug<GeminiFactsExtraction>(extractionPrompt, {
     systemInstruction:
