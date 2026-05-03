@@ -1,10 +1,16 @@
-import { scrapeReadableContentWithDebug, searchFirecrawlWithDebug, type FirecrawlSearchResult } from "./firecrawl";
+import {
+  scrapeReadableContentWithDebug,
+  searchFirecrawlWithDebug,
+  type FirecrawlScrapeDebug,
+  type FirecrawlSearchResult,
+} from "./firecrawl";
 import { askGeminiJsonWithDebug } from "./gemini";
 import { htmlToEssentialText, markdownToEssentialText } from "./htmlText";
 import type { CompanyRegistryRow, GoWorkFinancialRow, GoWorkReport, GoWorkReview, GoWorkRow } from "./types";
 
 const MAX_GOWORK_PAGES = 5;
 const GOWORK_HOST = "gowork.pl";
+const GOWORK_PAGE_SUFFIXES = ["dane-kontaktowe-firmy", "praca-i-zarobki"];
 const GOWORK_SCRAPE_OPTIONS = {
   formats: ["markdown", "links"] as const,
   onlyMainContent: true,
@@ -26,6 +32,7 @@ export async function fetchGoWorkReportWithDebug(
   const searchQuery = buildGoWorkSearchQuery(searchTerm);
   const searchResult = await searchFirecrawlWithDebug(searchQuery, { limit: 10, country: "PL" });
   const profileUrl = extractGoWorkProfileUrl(searchResult.results, searchTerm);
+  const searchPageUrls = extractGoWorkSearchPageUrls(searchResult.results, profileUrl);
 
   if (!profileUrl) {
     return {
@@ -43,7 +50,7 @@ export async function fetchGoWorkReportWithDebug(
   }
 
   const profileScrape = await scrapeReadableContentWithDebug(profileUrl, GOWORK_SCRAPE_OPTIONS);
-  const pageUrls = discoverGoWorkPageUrls(profileUrl, profileScrape);
+  const pageUrls = discoverGoWorkPageUrls(profileUrl, profileScrape, searchPageUrls);
   const additionalUrls = pageUrls.filter((url) => url !== profileUrl).slice(0, MAX_GOWORK_PAGES - 1);
   const additionalScrapes = await Promise.all(
     additionalUrls.map(async (url) => ({
@@ -55,11 +62,11 @@ export async function fetchGoWorkReportWithDebug(
   const scrapedPages = [
     { url: profileUrl, scrape: profileScrape },
     ...additionalScrapes,
-  ];
+  ].filter(({ scrape }) => isSuccessfulGoWorkScrape(scrape));
 
   const extractedPages = await Promise.all(
     scrapedPages.map(async ({ url, scrape }) => {
-      const text = scrape.markdown ? markdownToEssentialText(scrape.markdown) : htmlToEssentialText(scrape.html);
+      const text = prepareGoWorkText(scrape);
       const extraction = await askGeminiJsonWithDebug<GoWorkPageExtraction>(
         buildGoWorkExtractionPrompt(url, text),
         {
@@ -68,7 +75,15 @@ export async function fetchGoWorkReportWithDebug(
         }
       );
 
-      const rows = (extraction.content?.rows ?? []).map(normalizeGoWorkRow);
+      const deterministic = extractDeterministicGoWorkData(text);
+      const rows = mergeGoWorkRows([
+        ...deterministic.rows,
+        ...(extraction.content?.rows ?? []).map(normalizeGoWorkRow),
+      ]);
+      const financials = mergeGoWorkFinancials([
+        ...deterministic.financials,
+        ...(extraction.content?.financials ?? []).map(normalizeGoWorkFinancialRow),
+      ]);
 
       return {
         page: {
@@ -76,7 +91,7 @@ export async function fetchGoWorkReportWithDebug(
           url,
           rows,
           reviews: (extraction.content?.reviews ?? []).map(normalizeGoWorkReview),
-          financials: (extraction.content?.financials ?? []).map(normalizeGoWorkFinancialRow),
+          financials,
         },
         debug: {
           url,
@@ -183,12 +198,21 @@ function extractGoWorkProfileUrl(results: FirecrawlSearchResult[], companyName: 
         brandTokens.reduce((sum, token) => sum + (searchable.includes(token) ? 5 : 0), 0) +
         (new URL(url).pathname.includes("opinie_czytaj") ? 3 : 0) +
         (/,\d+/.test(new URL(url).pathname) ? 2 : 0);
-      return { url, score };
+      return { url: normalizeGoWorkProfileBaseUrl(url), score };
     })
     .filter((candidate): candidate is { url: string; score: number } => Boolean(candidate))
     .sort((a, b) => b.score - a.score);
 
   return candidates[0]?.url ?? null;
+}
+
+function extractGoWorkSearchPageUrls(results: FirecrawlSearchResult[], profileUrl: string | null): string[] {
+  const profileId = profileUrl ? extractGoWorkProfileId(profileUrl) : null;
+  return results
+    .map((result) => normalizeGoWorkUrlFromText(result.url))
+    .filter((url): url is string => Boolean(url))
+    .filter((url) => !profileId || extractGoWorkProfileId(url) === profileId)
+    .filter(isUsefulGoWorkProfilePage);
 }
 
 function normalizeGoWorkUrlFromText(value: string): string | null {
@@ -205,6 +229,19 @@ function normalizeGoWorkUrlFromText(value: string): string | null {
   }
 }
 
+function normalizeGoWorkProfileBaseUrl(value: string): string {
+  const url = new URL(normalizeGoWorkUrl(value));
+  const parts = url.pathname.split("/").filter(Boolean);
+  const lastPart = parts[parts.length - 1] ?? "";
+
+  if (GOWORK_PAGE_SUFFIXES.includes(lastPart)) {
+    parts.pop();
+    url.pathname = `/${parts.join("/")}`;
+  }
+
+  return normalizeGoWorkUrl(url.toString());
+}
+
 function goWorkMatchTokens(companyName: string): string[] {
   return deriveShortBrandName(companyName)
     .toLowerCase()
@@ -215,7 +252,8 @@ function goWorkMatchTokens(companyName: string): string[] {
 
 function discoverGoWorkPageUrls(
   profileUrl: string,
-  scrape: { links: string[]; markdown: string; html: string }
+  scrape: { links: string[]; markdown: string; html: string },
+  seedUrls: string[]
 ): string[] {
   const urls = new Set<string>([normalizeGoWorkUrl(profileUrl)]);
   const profileId = extractGoWorkProfileId(profileUrl);
@@ -225,6 +263,7 @@ function discoverGoWorkPageUrls(
 
   const candidates = [
     canonical,
+    ...seedUrls,
     ...scrape.links,
     ...extractMarkdownUrls(scrape.markdown),
     ...extractRegexMatches(scrape.html, hrefRegex),
@@ -243,17 +282,17 @@ function discoverGoWorkPageUrls(
     }
   }
 
-  const canonicalProfile = Array.from(urls).find((url) => {
+  const canonicalProfile = Array.from(urls).map(normalizeGoWorkProfileBaseUrl).find((url) => {
     const pathname = new URL(url).pathname;
     return /,\d+/.test(pathname) && !pathname.includes("opinie_czytaj");
   });
   if (canonicalProfile) {
-    for (const suffix of ["dane-kontaktowe-firmy", "praca-i-zarobki"]) {
+    for (const suffix of GOWORK_PAGE_SUFFIXES) {
       urls.add(`${canonicalProfile.replace(/\/$/, "")}/${suffix}`);
     }
   }
 
-  return Array.from(urls).slice(0, MAX_GOWORK_PAGES);
+  return Array.from(urls).filter((url) => !isDuplicatedGoWorkSuffixUrl(url)).slice(0, MAX_GOWORK_PAGES);
 }
 
 function extractMarkdownUrls(markdown: string): string[] {
@@ -284,6 +323,11 @@ function isUsefulGoWorkProfilePage(url: string): boolean {
   );
 }
 
+function isDuplicatedGoWorkSuffixUrl(value: string): boolean {
+  const parts = new URL(value).pathname.split("/").filter(Boolean);
+  return GOWORK_PAGE_SUFFIXES.some((suffix) => parts.filter((part) => part === suffix).length > 1);
+}
+
 function extractGoWorkProfileId(url: string): string | null {
   try {
     const pathname = new URL(url).pathname;
@@ -300,6 +344,62 @@ function normalizeGoWorkUrl(value: string): string {
   url.hash = "";
   url.search = "";
   return url.toString().replace(/\/$/, "");
+}
+
+function isSuccessfulGoWorkScrape(scrape: FirecrawlScrapeDebug): boolean {
+  const statusCode = Number(scrape.metadata.statusCode ?? 200);
+  const text = `${scrape.markdown} ${scrape.html}`.toLowerCase();
+  return statusCode < 400 && !text.includes("strona, ktorej szukasz nie istnieje");
+}
+
+function prepareGoWorkText(scrape: FirecrawlScrapeDebug): string {
+  if (!scrape.markdown) return htmlToEssentialText(scrape.html);
+  return markdownToEssentialText(extractRelevantGoWorkMarkdown(scrape.markdown));
+}
+
+function extractRelevantGoWorkMarkdown(markdown: string): string {
+  const relevantHeadings = [
+    "Dane kontaktowe",
+    "Dane firmowe",
+    "Władze firmy i powiązania",
+    "Przychody i zysk",
+    "Profil działalności",
+    "Opinie",
+    "Pytania",
+    "Rozmowa kwalifikacyjna",
+    "Praca i zarobki",
+    "Zarobki",
+    "Oferty pracy",
+    "Benefity",
+  ];
+  const stopHeadings = [
+    "Mapa",
+    "Sprawdź najnowsze oferty pracy z GoWork.pl",
+    "Firmy i biura",
+    "Aktualne oferty pracy",
+    "Opinie o firmach",
+    "Zostaw merytoryczną opinię",
+  ];
+  const lines = markdown.split("\n");
+  const chunks: string[] = [];
+  let current: string[] = [];
+  let keeping = false;
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^(#{2,6})\s+(.+?)\s*$/);
+    const headingLevel = headingMatch?.[1].length ?? 0;
+    const heading = headingMatch?.[2]?.trim() ?? "";
+    if (heading && headingLevel <= 3) {
+      if (current.length > 0 && keeping) chunks.push(current.join("\n"));
+      current = [];
+      keeping = relevantHeadings.some((name) => heading.toLowerCase().includes(name.toLowerCase()));
+      if (stopHeadings.some((name) => heading.toLowerCase().includes(name.toLowerCase()))) keeping = false;
+    }
+    if (keeping) current.push(line);
+  }
+
+  if (current.length > 0 && keeping) chunks.push(current.join("\n"));
+  return chunks.length > 0 ? chunks.join("\n\n") : markdown;
 }
 
 function isGoWorkHost(host: string): boolean {
@@ -324,6 +424,17 @@ function normalizeGoWorkRow(row: Partial<GoWorkRow>): GoWorkRow {
   };
 }
 
+function mergeGoWorkRows(rows: GoWorkRow[]): GoWorkRow[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    if (!row.label && !row.value) return false;
+    const key = `${row.category}|${row.label}|${row.value}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function normalizeGoWorkReview(review: Partial<GoWorkReview>): GoWorkReview {
   return {
     author: String(review.author ?? ""),
@@ -342,6 +453,138 @@ function normalizeGoWorkFinancialRow(row: Partial<GoWorkFinancialRow>): GoWorkFi
     revenue: String(row.revenue ?? ""),
     grossProfit: String(row.grossProfit ?? ""),
   };
+}
+
+function mergeGoWorkFinancials(rows: GoWorkFinancialRow[]): GoWorkFinancialRow[] {
+  const byYear = new Map<string, GoWorkFinancialRow>();
+  for (const row of rows) {
+    if (!row.year && !row.revenue && !row.grossProfit) continue;
+    const key = row.year || `${row.revenue}|${row.grossProfit}`;
+    const current = byYear.get(key);
+    byYear.set(key, {
+      year: current?.year || row.year,
+      revenue: current?.revenue || row.revenue,
+      grossProfit: current?.grossProfit || row.grossProfit,
+    });
+  }
+  return Array.from(byYear.values());
+}
+
+function extractDeterministicGoWorkData(text: string): { rows: GoWorkRow[]; financials: GoWorkFinancialRow[] } {
+  const rows: GoWorkRow[] = [];
+  const addRow = (category: string, label: string, value: string, sourceQuote?: string) => {
+    const normalizedValue = value.replace(/\s+/g, " ").trim();
+    if (!normalizedValue) return;
+    rows.push({
+      category,
+      label,
+      value: normalizedValue,
+      sourceQuote: (sourceQuote ?? normalizedValue).replace(/\s+/g, " ").slice(0, 180),
+    });
+  };
+
+  const address = extractAddress(text);
+  addRow("contact", "Adres", address);
+  addRow("contact", "NIP", extractLabeledValue(text, "NIP"), "NIP");
+  addRow("contact", "KRS", extractLabeledValue(text, "KRS"), "KRS");
+  addRow("contact", "REGON", extractLabeledValue(text, "REGON"), "REGON");
+  addRow("contact", "E-mail", text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? "");
+  addRow("contact", "Strona www", extractFirstHttpUrl(text, ["gowork.pl", "google.com", "about:invalid"]));
+  addRow("profile", "Nazwa pełna", extractMarkdownHeadingValue(text, "Nazwa pełna"));
+  addRow("profile", "Adres rejestrowy", extractMarkdownHeadingValue(text, "Adres rejestrowy"));
+  addRow("profile", "Kapitał zakładowy", extractMarkdownHeadingValue(text, "Kapitał zakładowy"));
+  addRow("profile", "Forma prawna", extractMarkdownHeadingValue(text, "Forma prawna"));
+  addRow(
+    "profile",
+    "Data rozpoczęcia działalności",
+    extractMarkdownHeadingValue(text, "Data rozpoczęcia wykonywania działalności gospodarczej")
+  );
+  addRow("profile", "Data rejestracji", extractMarkdownHeadingValue(text, "Data rejestracji"));
+  addRow("profile", "Zarząd", extractBoardMembers(text));
+
+  return {
+    rows,
+    financials: extractFinancialRows(text),
+  };
+}
+
+function extractLabeledValue(text: string, label: string): string {
+  return (
+    text.match(new RegExp(`\\*\\*${label}:\\*\\*\\s*([0-9]+)`, "i"))?.[1] ??
+    extractMarkdownHeadingValue(text, label)
+  );
+}
+
+function extractMarkdownHeadingValue(text: string, label: string): string {
+  const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = text.match(new RegExp(`^#{4,6}\\s+${escapedLabel}:?\\s*\\n+([\\s\\S]*?)(?=\\n#{3,6}\\s|\\n\\*\\*|\\n\\n#{4,6}\\s|$)`, "im"));
+  return cleanupExtractedValue(match?.[1] ?? "");
+}
+
+function extractAddress(text: string): string {
+  const contactSection = extractSection(text, "Dane kontaktowe");
+  const lines = contactSection
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith("#") && !line.startsWith("**") && !line.includes("mailto:") && !line.includes("http"));
+  return lines.slice(0, 2).join(", ");
+}
+
+function extractBoardMembers(text: string): string {
+  const boardSection = extractSection(text, "Władze firmy i powiązania");
+  return boardSection
+    .split("\n")
+    .map((line) => line.replace(/^-\s*/, "").trim())
+    .filter((line) => line && !line.startsWith("#") && line.toLowerCase() !== "zarząd")
+    .join(", ");
+}
+
+function extractFinancialRows(text: string): GoWorkFinancialRow[] {
+  const section = extractSection(text, "Przychody i zysk");
+  const years = Array.from(section.matchAll(/\b(20\d{2})\b/g)).map((match) => match[1]);
+  const moneyValues = Array.from(section.matchAll(/-?\d+(?:[,.]\d+)?\s*(?:mln|tys|zł)?/gi))
+    .map((match) => match[0].trim())
+    .filter((value) => !/^20\d{2}$/.test(value) && /(?:mln|tys|zł)/i.test(value));
+
+  if (years.length === 0 || moneyValues.length < years.length * 2) return [];
+  return years.map((year, index) => ({
+    year,
+    revenue: moneyValues[index * 2] ?? "",
+    grossProfit: moneyValues[index * 2 + 1] ?? "",
+  }));
+}
+
+function extractSection(text: string, heading: string): string {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.match(new RegExp(`^#{2,6}\\s+.*${escapedHeading}.*\\n([\\s\\S]*?)(?=\\n#{2,6}\\s|$)`, "im"))?.[1] ?? "";
+}
+
+function extractFirstHttpUrl(text: string, excludedHosts: string[]): string {
+  for (const match of text.matchAll(/https?:\/\/[^\s)\]]+/gi)) {
+    try {
+      const url = new URL(match[0]);
+      const host = url.hostname.replace(/^www\./, "").toLowerCase();
+      if (excludedHosts.some((excluded) => host === excluded || host.endsWith(`.${excluded}`))) continue;
+      url.hash = "";
+      url.search = "";
+      return url.toString().replace(/\/$/, "");
+    } catch {
+      // Ignore malformed URLs.
+    }
+  }
+  return "";
+}
+
+function cleanupExtractedValue(value: string): string {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(", ")
+    .replace(/\[([^\]]+)]\(([^)]+)\)/g, "$1")
+    .replace(/\*\*/g, "")
+    .trim();
 }
 
 function normalizeSentiment(value: unknown): GoWorkReview["sentiment"] {

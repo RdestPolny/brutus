@@ -4,7 +4,7 @@ const FIRECRAWL_SEARCH_API_URL = "https://api.firecrawl.dev/v2/search";
 export async function scrapeReadableContentWithDebug(
   url: string,
   options?: FirecrawlScrapeOptions
-): Promise<{ markdown: string; html: string; text: string; links: string[]; request: unknown; response: unknown }> {
+): Promise<FirecrawlScrapeDebug> {
   const apiKey = process.env.FIRECRAWL_API_KEY;
   if (!apiKey) throw new Error("FIRECRAWL_API_KEY not set");
   const requestTimeout = options?.timeout ?? 60000;
@@ -41,7 +41,8 @@ export async function scrapeReadableContentWithDebug(
   const html = String(data?.html ?? "");
   const text = markdown || html;
   const links = normalizeFirecrawlLinks(data?.links);
-  return { markdown, html, text, links, request, response };
+  const metadata = data?.metadata ?? {};
+  return { markdown, html, text, links, metadata, request, response };
 }
 
 export async function scrapeCleanHtmlWithDebug(
@@ -106,7 +107,27 @@ interface FirecrawlResponse {
     markdown?: string;
     html?: string;
     links?: FirecrawlLink[];
+    metadata?: FirecrawlMetadata;
   };
+}
+
+export interface FirecrawlScrapeDebug {
+  markdown: string;
+  html: string;
+  text: string;
+  links: string[];
+  metadata: FirecrawlMetadata;
+  request: unknown;
+  response: unknown;
+}
+
+interface FirecrawlMetadata {
+  statusCode?: number;
+  error?: string;
+  title?: string;
+  sourceURL?: string;
+  url?: string;
+  [key: string]: unknown;
 }
 
 type FirecrawlFormat =
