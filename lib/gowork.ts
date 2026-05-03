@@ -63,9 +63,10 @@ export async function fetchGoWorkReportWithDebug(
     { url: profileUrl, scrape: profileScrape },
     ...additionalScrapes,
   ].filter(({ scrape }) => isSuccessfulGoWorkScrape(scrape));
+  const uniqueScrapedPages = uniqueGoWorkScrapedPages(scrapedPages);
 
   const extractedPages = await Promise.all(
-    scrapedPages.map(async ({ url, scrape }) => {
+    uniqueScrapedPages.map(async ({ url, scrape }) => {
       const text = prepareGoWorkText(scrape);
       const extraction = await askGeminiJsonWithDebug<GoWorkPageExtraction>(
         buildGoWorkExtractionPrompt(url, text),
@@ -350,6 +351,30 @@ function isSuccessfulGoWorkScrape(scrape: FirecrawlScrapeDebug): boolean {
   const statusCode = Number(scrape.metadata.statusCode ?? 200);
   const text = `${scrape.markdown} ${scrape.html}`.toLowerCase();
   return statusCode < 400 && !text.includes("strona, ktorej szukasz nie istnieje");
+}
+
+function uniqueGoWorkScrapedPages(
+  pages: Array<{ url: string; scrape: FirecrawlScrapeDebug }>
+): Array<{ url: string; scrape: FirecrawlScrapeDebug }> {
+  const seen = new Set<string>();
+  return pages.filter(({ url, scrape }) => {
+    const effectiveUrl = String(scrape.metadata.url ?? scrape.metadata.sourceURL ?? url);
+    const key = normalizeGoWorkEquivalentPageUrl(effectiveUrl);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function normalizeGoWorkEquivalentPageUrl(value: string): string {
+  try {
+    const url = new URL(normalizeGoWorkUrl(value));
+    const profileId = extractGoWorkProfileId(url.toString());
+    if (profileId && url.pathname.includes("opinie_czytaj")) return `opinie:${profileId}`;
+    return url.toString();
+  } catch {
+    return value;
+  }
 }
 
 function prepareGoWorkText(scrape: FirecrawlScrapeDebug): string {

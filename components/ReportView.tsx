@@ -103,8 +103,8 @@ export function ReportView({ report }: { report: CompanyReport }) {
 }
 
 function ExecutiveOverview({ report }: { report: CompanyReport }) {
-  const financials = report.goWork.pages.flatMap((page) => page.financials);
-  const goWorkReviews = report.goWork.pages.flatMap((page) => page.reviews);
+  const financials = uniqueFinancials(report.goWork.pages.flatMap((page) => page.financials));
+  const goWorkReviews = uniqueGoWorkReviews(report.goWork.pages.flatMap((page) => page.reviews));
   const googlePlace = report.googlePlace;
   const goWorkSentiment = summarizeGoWorkSentiment(goWorkReviews);
   const googleSentiment = summarizeGoogleSentiment(googlePlace.reviews);
@@ -365,7 +365,7 @@ function PresenceSection({ report, rows }: { report: CompanyReport; rows: FactRo
 
 function ReputationSection({ report }: { report: CompanyReport }) {
   const place = report.googlePlace;
-  const goWorkReviews = report.goWork.pages.flatMap((page) => page.reviews);
+  const goWorkReviews = uniqueGoWorkReviews(report.goWork.pages.flatMap((page) => page.reviews));
 
   return (
     <div className="space-y-5">
@@ -615,6 +615,34 @@ function uniqueFinancials(rows: Array<{ year: string; revenue: string; grossProf
     });
 }
 
+function uniqueGoWorkReviews<T extends { author?: string; date?: string; type?: string; text: string }>(reviews: T[]): T[] {
+  const seen = new Set<string>();
+  return reviews.filter((review) => {
+    const textKey = normalizeForCompare(review.text).slice(0, 300);
+    if (!textKey || isSyntheticGoWorkReview(review)) return false;
+    const key = normalizeForCompare(`${review.author}:${review.date}:${review.type}:${textKey}`);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function isSyntheticGoWorkReview(review: { author?: string; type?: string; text: string }): boolean {
+  const author = normalizeForCompare(review.author ?? "");
+  const type = normalizeForCompare(review.type ?? "");
+  const text = normalizeForCompare(review.text);
+  return (
+    type.includes("asystent ai") ||
+    author.includes("asystent ai") ||
+    text.startsWith("jakie jest wynagrodzenie") ||
+    text.startsWith("jak wyglada praca") ||
+    text.startsWith("czy firma sprawdza kompetencje") ||
+    text.startsWith("w jaki sposob firma wdraza") ||
+    text.startsWith("czy kultura pracy sprzyja") ||
+    text.startsWith("czy przewidziane sa sciezki")
+  );
+}
+
 function uniqueFilings(rows: CompanyReport["krs"]["filings"]) {
   const seen = new Set<string>();
   return rows.filter((row) => {
@@ -650,7 +678,13 @@ function cleanValue(value: string | null | undefined): string {
 }
 
 function normalizeForCompare(value: string): string {
-  return cleanValue(value).toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/[.,;:()\s]+/g, " ").trim();
+  return cleanValue(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^https?:\/\/(www\.)?/, "")
+    .replace(/[.,;:()\s]+/g, " ")
+    .trim();
 }
 
 function includesAny(value: string, patterns: string[]): boolean {
@@ -757,7 +791,7 @@ function SentimentCard({ title, value }: { title: string; value: string }) {
   return (
     <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
       <p className="mb-1 text-sm font-medium text-gray-900">{title}</p>
-      <p className="max-h-28 overflow-hidden text-sm leading-6 text-gray-700">{value}</p>
+      <p className="text-sm leading-6 text-gray-700">{value}</p>
     </div>
   );
 }
@@ -1055,8 +1089,8 @@ function DigitalPresenceTable({ report }: { report: CompanyReport }) {
 function GoWorkSection({ report }: { report: CompanyReport }) {
   const goWork = report.goWork;
   const pages = goWork?.pages ?? [];
-  const reviews = pages.flatMap((page) => page.reviews.map((review) => ({ ...review, pageTitle: page.title })));
-  const financials = pages.flatMap((page) => page.financials);
+  const reviews = uniqueGoWorkReviews(pages.flatMap((page) => page.reviews.map((review) => ({ ...review, pageTitle: page.title }))));
+  const financials = uniqueFinancials(pages.flatMap((page) => page.financials));
 
   return (
     <div className="space-y-5">
@@ -1311,25 +1345,62 @@ function calculateGoWorkRating(
 function summarizeGoWorkSentiment(
   reviews: Array<{ sentiment: "positive" | "negative" | "neutral" | "unknown"; text: string }>
 ): string {
-  if (reviews.length === 0) return "Brak pobranych opinii GoWork do oceny sentymentu.";
-  const counts = sentimentCounts(reviews);
-  const dominant = dominantSentiment(counts);
-  const sample = reviews.find((review) => review.sentiment === dominant && review.text)?.text ?? reviews.find((review) => review.text)?.text ?? "";
+  const uniqueReviews = uniqueGoWorkReviews(reviews);
+  if (uniqueReviews.length === 0) return "Brak pobranych opinii GoWork do oceny sentymentu.";
+  const counts = sentimentCounts(uniqueReviews);
+  const assessment = cautiousSentimentAssessment(counts, uniqueReviews.length);
+  const sample = pickRiskSample(uniqueReviews);
 
-  return `W pobranych wpisach GoWork dominuje wydźwięk ${formatSentiment(dominant)} (${counts[dominant]} z ${reviews.length} wpisów). ${sentimentExplanation(dominant)}${sample ? ` Przykładowy motyw: ${shortenText(sample, 180)}` : ""}`;
+  return `Próba GoWork: ${uniqueReviews.length} wpisów. Rozkład: ${formatSentimentCounts(counts)}. Ocena ostrożna: ${assessment}. ${sample ? `Istotny sygnał: ${shortenText(sample, 150)}` : "Próbka jest ograniczona i może nie być reprezentatywna."}`;
 }
 
 function summarizeGoogleSentiment(reviews: Array<{ rating: number | null; text: string }>): string {
   if (reviews.length === 0) return "Brak pobranych opinii Google Maps do oceny sentymentu.";
+  const rated = reviews.filter((review) => review.rating !== null);
   const positive = reviews.filter((review) => (review.rating ?? 0) >= 4).length;
   const negative = reviews.filter((review) => (review.rating ?? 5) <= 2).length;
   const neutral = reviews.length - positive - negative;
-  const dominant = positive >= negative && positive >= neutral ? "positive" : negative >= neutral ? "negative" : "neutral";
-  const sample = reviews.find((review) =>
-    dominant === "positive" ? (review.rating ?? 0) >= 4 : dominant === "negative" ? (review.rating ?? 5) <= 2 : (review.rating ?? 0) === 3
-  )?.text ?? reviews.find((review) => review.text)?.text ?? "";
+  const total = reviews.length;
+  const average = rated.length > 0 ? rated.reduce((sum, review) => sum + (review.rating ?? 0), 0) / rated.length : null;
+  const sample = reviews.find((review) => (review.rating ?? 5) <= 2 && review.text)?.text ?? reviews.find((review) => review.text)?.text ?? "";
 
-  return `W opiniach Google Maps dominuje wydźwięk ${formatSentiment(dominant)} (${positive} pozytywnych, ${neutral} neutralnych, ${negative} negatywnych w pobranej próbce). ${sentimentExplanation(dominant)}${sample ? ` Przykładowy motyw: ${shortenText(sample, 180)}` : ""}`;
+  return `Próba Google Maps: ${total} opinii${average !== null ? `, średnia ${average.toFixed(1)}/5` : ""}. Rozkład: ${positive} pozytywne, ${neutral} neutralne, ${negative} negatywne. To sygnał z małej próbki, nie pełny obraz reputacji.${sample ? ` Przykład: ${shortenText(sample, 140)}` : ""}`;
+}
+
+function formatSentimentCounts(counts: Record<"positive" | "negative" | "neutral" | "unknown", number>): string {
+  return `${counts.positive} pozytywne, ${counts.neutral} neutralne, ${counts.negative} negatywne, ${counts.unknown} niejednoznaczne`;
+}
+
+function cautiousSentimentAssessment(
+  counts: Record<"positive" | "negative" | "neutral" | "unknown", number>,
+  total: number
+): string {
+  const sorted = (Object.entries(counts) as Array<["positive" | "negative" | "neutral" | "unknown", number]>)
+    .filter(([sentiment]) => sentiment !== "unknown")
+    .sort((a, b) => b[1] - a[1]);
+  const [dominant, dominantCount] = sorted[0] ?? ["unknown", 0];
+  const runnerUpCount = sorted[1]?.[1] ?? 0;
+  const share = dominantCount / Math.max(1, total);
+
+  if (total < 5) return `próbka jest mała, więc wynik traktuję jako jakościowy sygnał, nie ocenę firmy`;
+  if (counts.negative > 0 && counts.positive > 0 && (share < 0.7 || dominantCount - runnerUpCount < 2)) {
+    return "obraz jest mieszany; warto czytać treść wpisów, bo same proporcje mogą maskować silne ryzyka";
+  }
+  if (dominant === "positive") return "przewaga pozytywnych wpisów w pobranej próbce, z zastrzeżeniem możliwej selekcji źródła";
+  if (dominant === "negative") return "przewaga negatywnych wpisów w pobranej próbce; sygnały ryzyka wymagają weryfikacji w treści";
+  if (dominant === "neutral") return "większość wpisów ma charakter neutralny lub informacyjny";
+  return "część wpisów nie ma jednoznacznego wydźwięku";
+}
+
+function pickRiskSample(
+  reviews: Array<{ sentiment: "positive" | "negative" | "neutral" | "unknown"; text: string }>
+): string {
+  return (
+    reviews.find((review) => review.sentiment === "negative" && review.text)?.text ??
+    reviews.find((review) => review.sentiment === "neutral" && review.text)?.text ??
+    reviews.find((review) => review.text)?.text ??
+    ""
+  );
 }
 
 function sentimentCounts(reviews: Array<{ sentiment: "positive" | "negative" | "neutral" | "unknown" }>) {
@@ -1340,18 +1411,6 @@ function sentimentCounts(reviews: Array<{ sentiment: "positive" | "negative" | "
     },
     { positive: 0, negative: 0, neutral: 0, unknown: 0 }
   );
-}
-
-function dominantSentiment(counts: Record<"positive" | "negative" | "neutral" | "unknown", number>) {
-  const entries = Object.entries(counts) as Array<["positive" | "negative" | "neutral" | "unknown", number]>;
-  return entries.sort((a, b) => b[1] - a[1])[0][0];
-}
-
-function sentimentExplanation(sentiment: "positive" | "negative" | "neutral" | "unknown"): string {
-  if (sentiment === "positive") return "Komentarze częściej wskazują mocne strony doświadczenia z firmą.";
-  if (sentiment === "negative") return "Komentarze częściej sygnalizują ryzyka lub niezadowolenie.";
-  if (sentiment === "neutral") return "Komentarze mają mieszany lub informacyjny charakter.";
-  return "Część wpisów nie ma jednoznacznego wydźwięku.";
 }
 
 function shortenText(value: string, maxLength: number): string {
