@@ -101,12 +101,12 @@ export async function POST(req: NextRequest) {
       companyPagesResult,
       googlePlaceResult,
     ] = await Promise.all([
-      askPerplexityTableWithDebug(digitalPresencePrompt),
-      askPerplexityTableWithDebug(industryPrompt),
-      askPerplexityTableWithDebug(companyNewsPrompt),
-      askPerplexityTableWithDebug(mediaPrPrompt),
-      askPerplexityTableWithDebug(jobsTeamPrompt),
-      askPerplexityTableWithDebug(marketPositionPrompt),
+      safePerplexityTable(digitalPresencePrompt, "digitalPresence"),
+      safePerplexityTable(industryPrompt, "industry"),
+      safePerplexityTable(companyNewsPrompt, "companyNews"),
+      safePerplexityTable(mediaPrPrompt, "mediaPr"),
+      safePerplexityTable(jobsTeamPrompt, "jobsTeam"),
+      safePerplexityTable(marketPositionPrompt, "marketPosition"),
       extractWebsiteFactsWithDebug(resolvedWebsite),
       fetchWebsiteDigitalPresence(resolvedWebsite),
       fetchWhoisReportWithDebug(resolvedWebsite),
@@ -275,6 +275,23 @@ function perplexitySection(markdown: string): PerplexityResearchSection {
     rawMarkdown: markdown,
     rows: parsePerplexityFactRows(markdown),
   };
+}
+
+async function safePerplexityTable(
+  prompt: string,
+  label: string
+): Promise<{ content: string; request: unknown; response: unknown }> {
+  try {
+    return await askPerplexityTableWithDebug(prompt);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown Perplexity error";
+    console.warn(`[brief] Perplexity stream "${label}" failed: ${message}`);
+    return {
+      content: "",
+      request: { prompt, label, error: message },
+      response: { error: message },
+    };
+  }
 }
 
 function buildDebugSteps({
