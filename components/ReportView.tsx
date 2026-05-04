@@ -88,28 +88,35 @@ export function ReportView({ report }: { report: CompanyReport }) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="space-y-7">
+      <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-sm text-gray-500">Raport dla firmy</p>
-          <h2 className="text-2xl font-semibold tracking-tight text-gray-950">{reportTitle}</h2>
-          <p className="mt-1 text-sm text-gray-500">NIP: {report.input.nip}</p>
-          <p className="mt-1 text-sm text-gray-500">
-            Wygenerowano: {new Date(report.generatedAt).toLocaleString("pl-PL")}
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-600">
+            Raport firmowy
           </p>
+          <h2 className="mt-1 font-serif text-3xl font-semibold tracking-tight text-slate-950">
+            {reportTitle}
+          </h2>
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+            <span><span className="font-medium text-slate-700">NIP:</span> {report.input.nip}</span>
+            <span>
+              <span className="font-medium text-slate-700">Wygenerowano:</span>{" "}
+              {new Date(report.generatedAt).toLocaleString("pl-PL")}
+            </span>
+          </div>
         </div>
         <div className="flex gap-2 print:hidden">
           <button
             type="button"
             onClick={() => setDebugOpen(true)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
           >
             Debug
           </button>
           <button
             type="button"
             onClick={() => window.print()}
-            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
           >
             Drukuj
           </button>
@@ -122,7 +129,7 @@ export function ReportView({ report }: { report: CompanyReport }) {
       {activeTab && (
         <>
           <div className="print:hidden">
-            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white p-1">
+            <div className="sticky top-2 z-10 overflow-x-auto rounded-2xl border border-slate-200 bg-white/90 p-1.5 shadow-sm backdrop-blur">
               <div role="tablist" aria-label="Sekcje raportu" className="flex min-w-max gap-1">
                 {tabs.map((tab) => {
                   const isActive = tab.id === activeTab.id;
@@ -133,10 +140,10 @@ export function ReportView({ report }: { report: CompanyReport }) {
                       role="tab"
                       aria-selected={isActive}
                       onClick={() => setActiveTabId(tab.id)}
-                      className={`rounded-md px-3 py-2 text-sm font-medium transition ${
+                      className={`relative rounded-xl px-4 py-2.5 text-sm font-medium transition ${
                         isActive
-                          ? "bg-gray-950 text-white shadow-sm"
-                          : "text-gray-600 hover:bg-gray-100 hover:text-gray-950"
+                          ? "bg-slate-900 text-white shadow-[0_4px_12px_-4px_rgba(15,23,42,0.4)]"
+                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                       }`}
                     >
                       {tab.shortTitle}
@@ -184,47 +191,43 @@ function LeadBriefCard({ report }: { report: CompanyReport }) {
   if (!hasAny) return null;
 
   return (
-    <section className="rounded-lg border border-gray-900 bg-gray-950 p-5 text-gray-50 shadow-sm">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold">Brief lead'a</h3>
-          <p className="text-xs text-gray-400">Synteza ze wszystkich źródeł, do skanu w 30 sekund</p>
+    <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04),0_12px_36px_-16px_rgba(15,23,42,0.12)]">
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-indigo-500 via-violet-500 to-amber-400" />
+      <div className="p-6 sm:p-7">
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-indigo-600">
+              Lead Brief
+            </p>
+            <h3 className="mt-1 font-serif text-2xl font-semibold tracking-tight text-slate-950">
+              Brief sprzedażowy
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              Synteza ze wszystkich źródeł — skanowalna w 30 sekund.
+            </p>
+          </div>
         </div>
-      </div>
 
-      {synthesis.brief && (
-        <p className="mb-5 text-sm leading-6 text-gray-100">{synthesis.brief}</p>
-      )}
+        {synthesis.brief && (
+          <div className="mb-6 rounded-xl border border-slate-200/70 bg-slate-50/80 p-4">
+            <p className="text-[15px] leading-7 text-slate-800">{synthesis.brief}</p>
+          </div>
+        )}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {synthesis.signals.length > 0 && (
-          <BriefList
-            title="Sygnały sprzedażowe"
-            tone="signal"
-            items={synthesis.signals}
-          />
-        )}
-        {synthesis.redFlags.length > 0 && (
-          <BriefList
-            title="Czerwone flagi"
-            tone="flag"
-            items={synthesis.redFlags}
-          />
-        )}
-        {synthesis.suggestedQuestions.length > 0 && (
-          <BriefList
-            title="Pytania na rozmowę"
-            tone="question"
-            items={synthesis.suggestedQuestions}
-          />
-        )}
-        {synthesis.coverageNotes.length > 0 && (
-          <BriefList
-            title="Czego brakuje (dopytaj)"
-            tone="note"
-            items={synthesis.coverageNotes}
-          />
-        )}
+        <div className="grid gap-4 lg:grid-cols-2">
+          {synthesis.signals.length > 0 && (
+            <BriefList title="Sygnały sprzedażowe" tone="signal" items={synthesis.signals} />
+          )}
+          {synthesis.redFlags.length > 0 && (
+            <BriefList title="Czerwone flagi" tone="flag" items={synthesis.redFlags} />
+          )}
+          {synthesis.suggestedQuestions.length > 0 && (
+            <BriefList title="Pytania na rozmowę" tone="question" items={synthesis.suggestedQuestions} />
+          )}
+          {synthesis.coverageNotes.length > 0 && (
+            <BriefList title="Czego brakuje (dopytaj)" tone="note" items={synthesis.coverageNotes} />
+          )}
+        </div>
       </div>
     </section>
   );
@@ -239,20 +242,43 @@ function BriefList({
   items: string[];
   tone: "signal" | "flag" | "question" | "note";
 }) {
-  const palette: Record<typeof tone, { dot: string; box: string }> = {
-    signal: { dot: "bg-emerald-400", box: "border-emerald-500/30 bg-emerald-500/5" },
-    flag: { dot: "bg-red-400", box: "border-red-500/40 bg-red-500/5" },
-    question: { dot: "bg-blue-400", box: "border-blue-500/30 bg-blue-500/5" },
-    note: { dot: "bg-amber-300", box: "border-amber-500/30 bg-amber-500/5" },
+  const palette: Record<typeof tone, { dot: string; box: string; label: string; icon: string }> = {
+    signal: {
+      dot: "bg-emerald-500",
+      box: "border-emerald-200/80 bg-emerald-50/60",
+      label: "text-emerald-800",
+      icon: "▲",
+    },
+    flag: {
+      dot: "bg-red-500",
+      box: "border-red-200/80 bg-red-50/60",
+      label: "text-red-800",
+      icon: "■",
+    },
+    question: {
+      dot: "bg-indigo-500",
+      box: "border-indigo-200/80 bg-indigo-50/60",
+      label: "text-indigo-800",
+      icon: "?",
+    },
+    note: {
+      dot: "bg-amber-500",
+      box: "border-amber-200/80 bg-amber-50/60",
+      label: "text-amber-800",
+      icon: "·",
+    },
   };
-  const { dot, box } = palette[tone];
+  const { dot, box, label, icon } = palette[tone];
 
   return (
-    <div className={`rounded-md border ${box} p-3`}>
-      <p className="mb-2 text-sm font-semibold text-gray-50">{title}</p>
-      <ul className="space-y-2 text-sm leading-6 text-gray-200">
+    <div className={`rounded-xl border ${box} p-4`}>
+      <p className={`mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider ${label}`}>
+        <span className="font-mono text-[10px]">{icon}</span>
+        {title}
+      </p>
+      <ul className="space-y-2.5 text-sm leading-6 text-slate-700">
         {items.map((item, index) => (
-          <li key={index} className="flex gap-2">
+          <li key={index} className="flex gap-2.5">
             <span className={`mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
             <span>{item}</span>
           </li>
@@ -1510,11 +1536,12 @@ function GoWorkSection({ report }: { report: CompanyReport }) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-gray-200 bg-white">
-      <div className="border-b border-gray-200 px-5 py-3">
-        <h3 className="text-base font-semibold text-gray-950">{title}</h3>
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50/60 px-6 py-4">
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-500" />
+        <h3 className="font-serif text-lg font-semibold tracking-tight text-slate-950">{title}</h3>
       </div>
-      <div className="p-5">{children}</div>
+      <div className="p-6">{children}</div>
     </section>
   );
 }
