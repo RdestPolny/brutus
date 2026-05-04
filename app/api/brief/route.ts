@@ -9,7 +9,7 @@ import { fetchWebsiteDigitalPresence, mergeDigitalPresenceRows } from "@/lib/web
 import { fetchGoWorkReportWithDebug } from "@/lib/gowork";
 import { extractWebsiteFactsWithDebug } from "@/lib/websiteFacts";
 import { fetchKrsReportWithDebug, mergeRegistryRowsWithKrs } from "@/lib/krs";
-import type { CompanyRegistryRow, DigitalPresenceRow, GoWorkReport, KrsReport, PerplexityFactRow } from "@/lib/types";
+import type { ApiDebugStep, CompanyRegistryRow, DigitalPresenceRow, GoWorkReport, KrsReport, PerplexityFactRow } from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -112,38 +112,19 @@ export async function POST(req: NextRequest) {
         resolvedWebsite,
         goWorkWebsite,
         krsWebsite,
-        steps: [
-          {
-            name: "Firecrawl Search + Firecrawl + Gemini: GoWork",
-            request: goWorkResult.debug.searchRequest,
-            response: goWorkResult.debug,
-          },
-          {
-            name: "KRS OpenAPI: odpis aktualny i pełny",
-            request: krsResult.request,
-            response: krsResult.response,
-          },
-          {
-            name: "Perplexity: social media",
-            request: digitalPresenceResult.request,
-            response: digitalPresenceResult.response,
-          },
-          {
-            name: "Firecrawl + Gemini: fakty z oficjalnej strony",
-            request: websiteFactsResult.debug.scrapeRequest ?? { resolvedWebsite },
-            response: websiteFactsResult.debug,
-          },
-          {
-            name: "Website fallback: linki ze strony firmowej",
-            request: { resolvedWebsite },
-            response: websitePresenceResult.debug,
-          },
-          {
-            name: "Google Places: searchText (wybór po liczbie opinii)",
-            request: googlePlaceResult.request,
-            response: googlePlaceResult.response,
-          },
-        ],
+        steps: buildDebugSteps({
+          goWorkDebug: goWorkResult.debug,
+          krsRequest: krsResult.request,
+          krsResponse: krsResult.response,
+          digitalPresenceRequest: digitalPresenceResult.request,
+          digitalPresenceResponse: digitalPresenceResult.response,
+          digitalPresenceMarkdown,
+          websiteFactsDebug: websiteFactsResult.debug,
+          websitePresenceDebug: websitePresenceResult.debug,
+          googlePlacesRequest: googlePlaceResult.request,
+          googlePlacesResponse: googlePlaceResult.response,
+          resolvedWebsite,
+        }),
       },
     });
   } catch (err) {
@@ -151,6 +132,132 @@ export async function POST(req: NextRequest) {
     console.error("[brief] error:", err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+function buildDebugSteps({
+  goWorkDebug,
+  krsRequest,
+  krsResponse,
+  digitalPresenceRequest,
+  digitalPresenceResponse,
+  digitalPresenceMarkdown,
+  websiteFactsDebug,
+  websitePresenceDebug,
+  googlePlacesRequest,
+  googlePlacesResponse,
+  resolvedWebsite,
+}: {
+  goWorkDebug: {
+    searchRequest?: unknown;
+    searchResponse?: unknown;
+    skipped?: string;
+    discoveredPageUrls?: string[];
+    pages?: Array<{
+      url: string;
+      scrapeRequest: unknown;
+      scrapeResponse: unknown;
+      cleanedTextPreview: string;
+      extractionRequest: unknown;
+      extractionResponse: unknown;
+      extractionRawText: string;
+    }>;
+  };
+  krsRequest: unknown;
+  krsResponse: unknown;
+  digitalPresenceRequest: unknown;
+  digitalPresenceResponse: unknown;
+  digitalPresenceMarkdown: string;
+  websiteFactsDebug: {
+    skipped?: string;
+    scrapeRequest?: unknown;
+    scrapeResponse?: unknown;
+    cleanedTextPreview?: string;
+    extractionRequest?: unknown;
+    extractionResponse?: unknown;
+    extractionRawText?: string;
+  };
+  websitePresenceDebug: unknown;
+  googlePlacesRequest: unknown;
+  googlePlacesResponse: unknown;
+  resolvedWebsite: string | null;
+}): ApiDebugStep[] {
+  const steps: ApiDebugStep[] = [];
+
+  steps.push({
+    name: "Firecrawl Search: profil GoWork",
+    request: goWorkDebug.searchRequest ?? { skipped: goWorkDebug.skipped },
+    response: {
+      searchResponse: goWorkDebug.searchResponse ?? null,
+      discoveredPageUrls: goWorkDebug.discoveredPageUrls ?? [],
+      skipped: goWorkDebug.skipped,
+    },
+  });
+
+  for (const page of goWorkDebug.pages ?? []) {
+    steps.push({
+      name: `Firecrawl Scrape: GoWork - ${page.url}`,
+      request: page.scrapeRequest,
+      response: page.scrapeResponse,
+    });
+    steps.push({
+      name: `Gemini: ekstrakcja GoWork - ${page.url}`,
+      request: page.extractionRequest,
+      response: {
+        rawText: page.extractionRawText,
+        apiResponse: page.extractionResponse,
+        cleanedInputPreview: page.cleanedTextPreview,
+      },
+    });
+  }
+
+  steps.push({
+    name: "KRS OpenAPI: odpis aktualny i pełny",
+    request: krsRequest,
+    response: krsResponse,
+  });
+
+  steps.push({
+    name: "Perplexity: social media",
+    request: digitalPresenceRequest,
+    response: {
+      markdown: digitalPresenceMarkdown,
+      apiResponse: digitalPresenceResponse,
+    },
+  });
+
+  if (websiteFactsDebug.scrapeRequest || websiteFactsDebug.scrapeResponse) {
+    steps.push({
+      name: "Firecrawl Scrape: oficjalna strona",
+      request: websiteFactsDebug.scrapeRequest ?? { resolvedWebsite },
+      response: websiteFactsDebug.scrapeResponse ?? { skipped: websiteFactsDebug.skipped },
+    });
+  }
+
+  if (websiteFactsDebug.extractionRequest || websiteFactsDebug.extractionResponse || websiteFactsDebug.extractionRawText) {
+    steps.push({
+      name: "Gemini: fakty z oficjalnej strony",
+      request: websiteFactsDebug.extractionRequest ?? { resolvedWebsite },
+      response: {
+        rawText: websiteFactsDebug.extractionRawText ?? "",
+        apiResponse: websiteFactsDebug.extractionResponse ?? null,
+        cleanedInputPreview: websiteFactsDebug.cleanedTextPreview ?? "",
+      },
+    });
+  }
+
+  steps.push({
+    name: "Website fallback: linki ze strony firmowej",
+    request: { resolvedWebsite },
+    response: websitePresenceDebug,
+  });
+
+  steps.push({
+    name: "Google Places: searchText",
+    request: googlePlacesRequest,
+    response: googlePlacesResponse,
+  });
+
+  return steps;
 }
 
 function buildPlacesQueries({

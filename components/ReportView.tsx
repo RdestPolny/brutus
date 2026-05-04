@@ -1569,16 +1569,13 @@ function DebugModal({ report, onClose }: { report: CompanyReport; onClose: () =>
             <Empty />
           ) : (
             <div className="space-y-4">
+              <div className="rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+                <span className="font-medium text-gray-900">{debug.steps?.length ?? 0}</span> osobnych kroków debug:
+                każde zapytanie i każda odpowiedź są w oddzielnym bloku.
+              </div>
+
               {debug.steps?.map((step, index) => (
-                <details key={`${step.name}-${index}`} open={index === 0} className="rounded-md border border-gray-200">
-                  <summary className="cursor-pointer bg-gray-50 px-4 py-3 text-sm font-medium text-gray-900">
-                    {step.name}
-                  </summary>
-                  <div className="grid gap-4 p-4 md:grid-cols-2">
-                    <DebugBlock title="Request" value={step.request} />
-                    <DebugBlock title="Response" value={step.response} />
-                  </div>
-                </details>
+                <DebugStepCard key={`${step.name}-${index}`} index={index} step={step} />
               ))}
 
               <details className="rounded-md border border-gray-200">
@@ -1606,13 +1603,81 @@ function DebugModal({ report, onClose }: { report: CompanyReport; onClose: () =>
   );
 }
 
+function DebugStepCard({
+  index,
+  step,
+}: {
+  index: number;
+  step: NonNullable<CompanyReport["debug"]>["steps"][number];
+}) {
+  return (
+    <div className="rounded-md border border-gray-200">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-4 py-3">
+        <div>
+          <p className="text-sm font-medium text-gray-900">
+            {index + 1}. {step.name}
+          </p>
+          <p className="text-xs text-gray-500">{debugSourceLabel(step.name)}</p>
+        </div>
+      </div>
+      <div className="space-y-3 p-4">
+        <DebugPayloadDetails title="Input / zapytanie" value={step.request} defaultOpen={index === 0} />
+        <DebugPayloadDetails title="Output / odpowiedź" value={step.response} defaultOpen={index === 0} />
+      </div>
+    </div>
+  );
+}
+
+function DebugPayloadDetails({
+  title,
+  value,
+  defaultOpen,
+}: {
+  title: string;
+  value: unknown;
+  defaultOpen?: boolean;
+}) {
+  const serialized = stringifyDebugValue(value);
+
+  return (
+    <details open={defaultOpen} className="rounded-md border border-gray-200 bg-white">
+      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-600">
+        {title}
+      </summary>
+      <pre className="max-h-96 overflow-auto border-t border-gray-200 bg-gray-950 p-3 text-xs leading-5 text-gray-100 whitespace-pre-wrap">
+        {serialized}
+      </pre>
+    </details>
+  );
+}
+
 function DebugBlock({ title, value }: { title: string; value: unknown }) {
   return (
     <div>
       <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</p>
       <pre className="max-h-96 overflow-auto rounded-md border border-gray-200 bg-gray-950 p-3 text-xs leading-5 text-gray-100 whitespace-pre-wrap">
-        {typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+        {stringifyDebugValue(value)}
       </pre>
     </div>
   );
+}
+
+function stringifyDebugValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === undefined) return "undefined";
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function debugSourceLabel(name: string): string {
+  if (name.startsWith("Gemini")) return "AI: Gemini";
+  if (name.startsWith("Perplexity")) return "AI: Perplexity";
+  if (name.startsWith("Firecrawl")) return "Scraping: Firecrawl";
+  if (name.startsWith("Google Places")) return "API: Google Places";
+  if (name.startsWith("KRS")) return "API: KRS";
+  return "Debug";
 }
