@@ -25,7 +25,7 @@ const GOWORK_WEBSITE_EXCLUDED_HOSTS = [
   "twitter.com",
 ];
 const GOWORK_SCRAPE_OPTIONS = {
-  formats: ["markdown", "links"] as const,
+  formats: ["markdown", "html", "links"] as const,
   onlyMainContent: true,
   maxAge: 6 * 60 * 60 * 1000,
   waitFor: 1500,
@@ -89,7 +89,7 @@ export async function fetchGoWorkReportWithDebug(
         }
       );
 
-      const deterministic = extractDeterministicGoWorkData(text);
+      const deterministic = extractDeterministicGoWorkData(text, scrape.html);
       const rows = mergeGoWorkRows([
         ...deterministic.rows,
         ...(extraction.content?.rows ?? []).map(normalizeGoWorkRow),
@@ -524,7 +524,7 @@ function mergeGoWorkFinancials(rows: GoWorkFinancialRow[]): GoWorkFinancialRow[]
   return Array.from(byYear.values());
 }
 
-function extractDeterministicGoWorkData(text: string): { rows: GoWorkRow[]; financials: GoWorkFinancialRow[] } {
+function extractDeterministicGoWorkData(text: string, html: string): { rows: GoWorkRow[]; financials: GoWorkFinancialRow[] } {
   const rows: GoWorkRow[] = [];
   const addRow = (category: string, label: string, value: string, sourceQuote?: string) => {
     const normalizedValue = value.replace(/\s+/g, " ").trim();
@@ -546,7 +546,9 @@ function extractDeterministicGoWorkData(text: string): { rows: GoWorkRow[]; fina
   addRow(
     "contact",
     "Strona www",
-    extractLabeledWebsite(text) || extractFirstHttpUrl(text, GOWORK_WEBSITE_EXCLUDED_HOSTS)
+    extractGoWorkContactWebsiteFromHtml(html) ||
+      extractLabeledWebsite(text) ||
+      extractFirstHttpUrl(text, GOWORK_WEBSITE_EXCLUDED_HOSTS)
   );
   addRow("profile", "Nazwa pełna", extractMarkdownHeadingValue(text, "Nazwa pełna"));
   addRow("profile", "Adres rejestrowy", extractMarkdownHeadingValue(text, "Adres rejestrowy"));
@@ -571,6 +573,43 @@ function extractLabeledValue(text: string, label: string): string {
     text.match(new RegExp(`\\*\\*${label}:\\*\\*\\s*([0-9]+)`, "i"))?.[1] ??
     extractMarkdownHeadingValue(text, label)
   );
+}
+
+function extractGoWorkContactWebsiteFromHtml(html: string): string {
+  if (!html) return "";
+
+  const contactSection = extractHtmlSection(html, "Dane kontaktowe", "Dane firmowe") || html;
+  const hrefRegex = /<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = hrefRegex.exec(contactSection))) {
+    const href = decodeHtmlEntities(match[1]);
+    const anchorText = htmlToEssentialText(match[2]);
+    if (/^mailto:/i.test(href)) continue;
+
+    const website = extractWebsiteCandidate(`${href} ${anchorText}`);
+    if (website) return website;
+  }
+
+  return "";
+}
+
+function extractHtmlSection(html: string, startText: string, endText: string): string {
+  const startIndex = html.toLowerCase().indexOf(startText.toLowerCase());
+  if (startIndex < 0) return "";
+
+  const afterStart = html.slice(startIndex);
+  const endIndex = afterStart.toLowerCase().indexOf(endText.toLowerCase());
+  return endIndex > 0 ? afterStart.slice(0, endIndex) : afterStart;
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
 }
 
 function extractLabeledWebsite(text: string): string {
