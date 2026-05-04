@@ -1,5 +1,7 @@
 const DEFAULT_GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
 const DEFAULT_GEMINI_MODEL = "gemini-3.1-flash-lite-preview";
+const MAX_RETRIES = 3;
+const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 
 export async function askGeminiJsonWithDebug<T>(
   prompt: string,
@@ -31,31 +33,65 @@ export async function askGeminiJsonWithDebug<T>(
     },
   };
 
-  const res = await fetch(`${baseUrl}/${modelPath}:generateContent`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
-    },
-    body: JSON.stringify(request),
-    signal: AbortSignal.timeout(60000),
-  });
+  let lastError: Error | null = null;
 
-  const rawText = await res.text();
-  const response = parseJsonOrRawText(rawText);
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    try {
+      const res = await fetch(`${baseUrl}/${modelPath}:generateContent`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify(request),
+        signal: AbortSignal.timeout(60000),
+      });
 
-  if (!res.ok) {
-    throw new Error(`Gemini error ${res.status}: ${JSON.stringify(response)}`);
+      const rawText = await res.text();
+      const response = parseJsonOrRawText(rawText);
+
+      if (!res.ok) {
+        const error = new Error(`Gemini error ${res.status}: ${JSON.stringify(response)}`);
+        if (RETRYABLE_STATUSES.has(res.status) && attempt < MAX_RETRIES) {
+          lastError = error;
+          await sleep(backoffMs(attempt));
+          continue;
+        }
+        throw error;
+      }
+
+      const answerText = extractGeminiText(response).trim();
+      return {
+        content: parseModelJson<T>(answerText),
+        rawText: answerText,
+        request,
+        response,
+      };
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      const isAbort = error.name === "AbortError" || /aborted|timeout/i.test(error.message);
+      const isNetwork = /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND/i.test(error.message);
+      const shouldRetry = (isAbort || isNetwork || /Gemini error 5\d\d|Gemini error 429/.test(error.message)) && attempt < MAX_RETRIES;
+      if (shouldRetry) {
+        lastError = error;
+        await sleep(backoffMs(attempt));
+        continue;
+      }
+      throw error;
+    }
   }
 
-  const answerText = extractGeminiText(response).trim();
+  throw lastError ?? new Error("Gemini error: exhausted retries");
+}
 
-  return {
-    content: parseModelJson<T>(answerText),
-    rawText: answerText,
-    request,
-    response,
-  };
+function backoffMs(attempt: number): number {
+  const base = 750 * Math.pow(2, attempt);
+  const jitter = Math.floor(Math.random() * 400);
+  return base + jitter;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function extractGeminiText(response: unknown): string {

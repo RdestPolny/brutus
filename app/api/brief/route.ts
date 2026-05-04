@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
       validation: null,
     };
 
-    const industryGeminiResult = await askGeminiJsonWithDebug<IndustryReport>(
+    const industryGeminiResult = await safeGeminiJson<IndustryReport>(
       buildIndustryGeminiPrompt({
         companyName,
         mainActivity: firstRegistryRow.mainActivity,
@@ -154,7 +154,8 @@ export async function POST(req: NextRequest) {
       {
         systemInstruction:
           "Redagujesz syntetyczny raport branżowy po polsku dla handlowca agencji marketingowej. Korzystasz wyłącznie z przekazanego researchu i dodajesz ostrożny komentarz analityczny.",
-      }
+      },
+      "industry"
     );
     const industryReport = normalizeIndustryReport(industryGeminiResult.content);
 
@@ -163,7 +164,7 @@ export async function POST(req: NextRequest) {
     const jobsTeam = perplexitySection(jobsTeamResult.content);
     const marketPosition = perplexitySection(marketPositionResult.content);
 
-    const synthesisResult = await synthesizeLeadWithDebug({
+    const synthesisResult = await safeSynthesize({
       registry: firstRegistryRow ?? null,
       websiteFacts,
       whois: whoisResult.report,
@@ -289,6 +290,43 @@ async function safePerplexityTable(
     return {
       content: "",
       request: { prompt, label, error: message },
+      response: { error: message },
+    };
+  }
+}
+
+type SynthesizeArgs = Parameters<typeof synthesizeLeadWithDebug>[0];
+type SynthesizeResult = Awaited<ReturnType<typeof synthesizeLeadWithDebug>>;
+
+async function safeSynthesize(input: SynthesizeArgs): Promise<SynthesizeResult> {
+  try {
+    return await synthesizeLeadWithDebug(input);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown synthesis error";
+    console.warn(`[brief] Synthesis failed: ${message}`);
+    return {
+      synthesis: null,
+      request: { error: message },
+      response: { error: message },
+      rawText: "",
+    };
+  }
+}
+
+async function safeGeminiJson<T>(
+  prompt: string,
+  options: { systemInstruction?: string; model?: string },
+  label: string
+): Promise<{ content: T | null; rawText: string; request: unknown; response: unknown }> {
+  try {
+    return await askGeminiJsonWithDebug<T>(prompt, options);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown Gemini error";
+    console.warn(`[brief] Gemini call "${label}" failed: ${message}`);
+    return {
+      content: null,
+      rawText: "",
+      request: { prompt: prompt.slice(0, 200), label, error: message },
       response: { error: message },
     };
   }
