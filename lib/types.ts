@@ -1,6 +1,7 @@
 export interface ReportInput {
   nip: string;
   companyName?: string;
+  officialWebsite?: string;
 }
 
 export interface CompanyRegistryRow {

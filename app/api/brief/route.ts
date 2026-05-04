@@ -14,7 +14,7 @@ import type { ApiDebugStep, CompanyRegistryRow, DigitalPresenceRow, GoWorkReport
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
-  let body: { nip?: string };
+  let body: { nip?: string; officialWebsite?: string };
 
   try {
     body = await req.json();
@@ -25,6 +25,10 @@ export async function POST(req: NextRequest) {
   const nip = normalizeNip(body.nip);
   if (!nip) {
     return NextResponse.json({ error: "Podaj poprawny NIP (10 cyfr)" }, { status: 400 });
+  }
+  const officialWebsite = normalizeOfficialWebsite(body.officialWebsite);
+  if (!officialWebsite) {
+    return NextResponse.json({ error: "Podaj poprawny, sprawdzony adres strony klienta" }, { status: 400 });
   }
 
   try {
@@ -44,7 +48,6 @@ export async function POST(req: NextRequest) {
     const firstRegistryRow = registryRows[0];
     const goWorkWebsite = extractWebsiteFromGoWork(goWork);
     const krsWebsite = extractWebsiteFromKrs(krsResult.report);
-    const officialWebsite = goWorkWebsite ?? krsWebsite;
 
     const digitalPresencePrompt = buildDigitalPresencePrompt(nip, {
       officialWebsite,
@@ -79,7 +82,7 @@ export async function POST(req: NextRequest) {
     const googlePlaceResult = await fetchBestGooglePlaceReportWithDebug(placesQueries);
 
     return NextResponse.json({
-      input: { nip, companyName: firstRegistryRow.name || undefined },
+      input: { nip, companyName: firstRegistryRow.name || undefined, officialWebsite },
       generatedAt: new Date().toISOString(),
       registry: {
         rawMarkdown: goWork.searchRawMarkdown,
@@ -317,6 +320,27 @@ function uniqueStrings(values: string[]): string[] {
 function normalizeNip(value: unknown): string | null {
   const digits = String(value ?? "").replace(/\D/g, "");
   return /^\d{10}$/.test(digits) ? digits : null;
+}
+
+function normalizeOfficialWebsite(value: unknown): string | null {
+  const rawValue = String(value ?? "").trim();
+  if (!rawValue) return null;
+  const withProtocol = /^https?:\/\//i.test(rawValue) ? rawValue : `https://${rawValue}`;
+
+  try {
+    const url = new URL(withProtocol);
+    url.protocol = "https:";
+    url.hash = "";
+    url.search = "";
+    url.pathname = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "");
+    const host = url.hostname.replace(/^www\./, "").toLowerCase();
+    if (!isValidWebsiteHost(host)) return null;
+    if (isDirectoryOrSocialDomain(host)) return null;
+    url.hostname = host;
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
 }
 
 function extractOfficialWebsite(response: unknown, companyName: string): string | null {
@@ -621,6 +645,7 @@ function isDirectoryOrSocialDomain(host: string): boolean {
     "tiktok.com",
     "x.com",
     "twitter.com",
+    "gowhistle.com",
   ];
 
   return excludedDomains.some((domain) => host === domain || host.endsWith(`.${domain}`));

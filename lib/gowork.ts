@@ -23,6 +23,7 @@ const GOWORK_WEBSITE_EXCLUDED_HOSTS = [
   "tiktok.com",
   "x.com",
   "twitter.com",
+  "gowhistle.com",
 ];
 const GOWORK_SCRAPE_OPTIONS = {
   formats: ["markdown"] as const,
