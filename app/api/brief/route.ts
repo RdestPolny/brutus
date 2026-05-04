@@ -150,6 +150,9 @@ function buildDebugSteps({
   goWorkDebug: {
     searchRequest?: unknown;
     searchResponse?: unknown;
+    linkSelectionRequest?: unknown;
+    linkSelectionResponse?: unknown;
+    linkSelectionRawText?: string;
     skipped?: string;
     discoveredPageUrls?: string[];
     pages?: Array<{
@@ -186,12 +189,20 @@ function buildDebugSteps({
   steps.push({
     name: "Firecrawl Search: profil GoWork",
     request: goWorkDebug.searchRequest ?? { skipped: goWorkDebug.skipped },
-    response: {
-      searchResponse: goWorkDebug.searchResponse ?? null,
-      discoveredPageUrls: goWorkDebug.discoveredPageUrls ?? [],
-      skipped: goWorkDebug.skipped,
-    },
+    response: goWorkDebug.searchResponse ?? { skipped: goWorkDebug.skipped },
   });
+
+  if (goWorkDebug.linkSelectionRequest || goWorkDebug.linkSelectionResponse || goWorkDebug.linkSelectionRawText) {
+    steps.push({
+      name: "Gemini: wybór linków GoWork po NIP",
+      request: goWorkDebug.linkSelectionRequest ?? { skipped: goWorkDebug.skipped },
+      response: {
+        rawText: goWorkDebug.linkSelectionRawText ?? "",
+        apiResponse: goWorkDebug.linkSelectionResponse ?? null,
+        discoveredPageUrls: goWorkDebug.discoveredPageUrls ?? [],
+      },
+    });
+  }
 
   for (const page of goWorkDebug.pages ?? []) {
     steps.push({

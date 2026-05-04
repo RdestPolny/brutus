@@ -5,7 +5,7 @@ import {
   type FirecrawlSearchResult,
 } from "./firecrawl";
 import { askGeminiJsonWithDebug } from "./gemini";
-import { htmlToEssentialText, markdownToEssentialText } from "./htmlText";
+import { markdownToEssentialText } from "./htmlText";
 import type { CompanyRegistryRow, GoWorkFinancialRow, GoWorkReport, GoWorkReview, GoWorkRow } from "./types";
 
 const MAX_GOWORK_PAGES = 5;
@@ -25,7 +25,7 @@ const GOWORK_WEBSITE_EXCLUDED_HOSTS = [
   "twitter.com",
 ];
 const GOWORK_SCRAPE_OPTIONS = {
-  formats: ["markdown", "html", "links"] as const,
+  formats: ["markdown"] as const,
   onlyMainContent: true,
   maxAge: 6 * 60 * 60 * 1000,
   waitFor: 1500,
@@ -39,15 +39,23 @@ const GOWORK_SCRAPE_OPTIONS = {
 
 export async function fetchGoWorkReportWithDebug(
   company: CompanyRegistryRow,
-  _context?: { nip?: string; krs?: string }
+  context?: { nip?: string; krs?: string }
 ): Promise<GoWorkReport & { debug: GoWorkDebug }> {
-  const searchTerm = company.nip || company.name;
+  const targetNip = context?.nip || company.nip;
+  const searchTerm = targetNip || company.name;
   const searchQuery = buildGoWorkSearchQuery(searchTerm);
   const searchResult = await searchFirecrawlWithDebug(searchQuery, { limit: 10, country: "PL" });
-  const profileUrl = extractGoWorkProfileUrl(searchResult.results, searchTerm);
-  const searchPageUrls = extractGoWorkSearchPageUrls(searchResult.results, profileUrl);
+  const linkSelection = await askGeminiJsonWithDebug<GoWorkLinkSelection>(
+    buildGoWorkLinkSelectionPrompt(targetNip || searchTerm, searchResult.response),
+    {
+      systemInstruction:
+        "Wybierasz wyłącznie linki GoWork dotyczące firmy o podanym NIP. Zwracasz tylko poprawny JSON bez komentarzy.",
+    }
+  );
+  const pageUrls = selectGoWorkPageUrls(linkSelection.content, searchResult.results, targetNip || searchTerm);
+  const profileUrl = extractPreferredGoWorkProfileUrl(pageUrls);
 
-  if (!profileUrl) {
+  if (pageUrls.length === 0) {
     return {
       profileUrl: null,
       searchRawMarkdown: searchResult.results
@@ -57,25 +65,23 @@ export async function fetchGoWorkReportWithDebug(
       debug: {
         searchRequest: searchResult.request,
         searchResponse: searchResult.response,
-        skipped: "No GoWork profile URL found",
+        linkSelectionRequest: linkSelection.request,
+        linkSelectionResponse: linkSelection.response,
+        linkSelectionRawText: linkSelection.rawText,
+        discoveredPageUrls: [],
+        skipped: "No GoWork URLs selected for target NIP",
       },
     };
   }
 
-  const profileScrape = await scrapeReadableContentWithDebug(profileUrl, GOWORK_SCRAPE_OPTIONS);
-  const pageUrls = discoverGoWorkPageUrls(profileUrl, profileScrape, searchPageUrls);
-  const additionalUrls = pageUrls.filter((url) => url !== profileUrl).slice(0, MAX_GOWORK_PAGES - 1);
-  const additionalScrapes = await Promise.all(
-    additionalUrls.map(async (url) => ({
+  const scrapes = await Promise.all(
+    pageUrls.slice(0, MAX_GOWORK_PAGES).map(async (url) => ({
       url,
       scrape: await scrapeReadableContentWithDebug(url, GOWORK_SCRAPE_OPTIONS),
     }))
   );
 
-  const scrapedPages = [
-    { url: profileUrl, scrape: profileScrape },
-    ...additionalScrapes,
-  ].filter(({ scrape }) => isSuccessfulGoWorkScrape(scrape));
+  const scrapedPages = scrapes.filter(({ scrape }) => isSuccessfulGoWorkScrape(scrape));
   const uniqueScrapedPages = uniqueGoWorkScrapedPages(scrapedPages);
 
   const extractedPages = await Promise.all(
@@ -89,7 +95,7 @@ export async function fetchGoWorkReportWithDebug(
         }
       );
 
-      const deterministic = extractDeterministicGoWorkData(text, scrape.html);
+      const deterministic = extractDeterministicGoWorkData(text);
       const rows = mergeGoWorkRows([
         ...deterministic.rows,
         ...(extraction.content?.rows ?? []).map(normalizeGoWorkRow),
@@ -129,6 +135,9 @@ export async function fetchGoWorkReportWithDebug(
     debug: {
       searchRequest: searchResult.request,
       searchResponse: searchResult.response,
+      linkSelectionRequest: linkSelection.request,
+      linkSelectionResponse: linkSelection.response,
+      linkSelectionRawText: linkSelection.rawText,
       discoveredPageUrls: pageUrls,
       pages: extractedPages.map((item) => item.debug),
     },
@@ -137,6 +146,29 @@ export async function fetchGoWorkReportWithDebug(
 
 function buildGoWorkSearchQuery(searchTerm: string): string {
   return `${deriveShortBrandName(searchTerm)} gowork`;
+}
+
+function buildGoWorkLinkSelectionPrompt(nip: string, searchResponse: unknown): string {
+  return `NIP firmy: ${nip}
+
+Poniżej znajduje się pełna odpowiedź Firecrawl Search dla zapytania "<NIP> gowork".
+Wybierz WYŁĄCZNIE linki z domeny gowork.pl, które dotyczą firmy o podanym NIP.
+
+Zwróć WYŁĄCZNIE poprawny JSON w formacie:
+{
+  "urls": ["https://www.gowork.pl/..."],
+  "reason": "krótkie uzasadnienie wyboru"
+}
+
+Instrukcje:
+- Preferuj linki do zakładek "dane-kontaktowe-firmy", "praca-i-zarobki" oraz "opinie_czytaj" dla tego samego profilu GoWork.
+- Odrzuć profile innych firm, nawet jeśli są podobne nazwą.
+- Jeśli NIP widoczny jest w opisie wyniku, musi zgadzać się z NIP firmy.
+- Nie dodawaj linków spoza odpowiedzi Firecrawl Search.
+- Nie zgaduj brakujących linków.
+
+ODPOWIEDŹ FIRECRAWL SEARCH:
+${JSON.stringify(searchResponse, null, 2)}`;
 }
 
 function deriveShortBrandName(companyName: string): string {
@@ -201,32 +233,66 @@ TEKST:
 ${text}`;
 }
 
-function extractGoWorkProfileUrl(results: FirecrawlSearchResult[], companyName: string): string | null {
-  const brandTokens = goWorkMatchTokens(companyName);
-  const candidates = results
-    .map((result) => {
-      const url = normalizeGoWorkUrlFromText(result.url);
-      if (!url) return null;
-      const searchable = `${result.title ?? ""} ${result.description ?? ""} ${result.url}`.toLowerCase();
-      const score =
-        brandTokens.reduce((sum, token) => sum + (searchable.includes(token) ? 5 : 0), 0) +
-        (new URL(url).pathname.includes("opinie_czytaj") ? 3 : 0) +
-        (/,\d+/.test(new URL(url).pathname) ? 2 : 0);
-      return { url: normalizeGoWorkProfileBaseUrl(url), score };
-    })
-    .filter((candidate): candidate is { url: string; score: number } => Boolean(candidate))
-    .sort((a, b) => b.score - a.score);
-
-  return candidates[0]?.url ?? null;
-}
-
-function extractGoWorkSearchPageUrls(results: FirecrawlSearchResult[], profileUrl: string | null): string[] {
-  const profileId = profileUrl ? extractGoWorkProfileId(profileUrl) : null;
-  return results
+function selectGoWorkPageUrls(
+  selection: GoWorkLinkSelection | null,
+  results: FirecrawlSearchResult[],
+  targetNip: string
+): string[] {
+  const searchResultUrls = results
     .map((result) => normalizeGoWorkUrlFromText(result.url))
     .filter((url): url is string => Boolean(url))
-    .filter((url) => !profileId || extractGoWorkProfileId(url) === profileId)
     .filter(isUsefulGoWorkProfilePage);
+  const allowedUrls = new Set(searchResultUrls.map((url) => url.toLowerCase()));
+  const selectedUrls = (selection?.urls ?? [])
+    .map((url) => normalizeGoWorkUrlFromText(String(url)))
+    .filter((url): url is string => Boolean(url))
+    .filter(isUsefulGoWorkProfilePage)
+    .filter((url) => allowedUrls.has(url.toLowerCase()));
+  const normalizedTarget = targetNip.toLowerCase();
+  const fallbackUrls = results
+    .filter((result) =>
+      `${result.title ?? ""} ${result.description ?? ""} ${result.url}`.toLowerCase().includes(normalizedTarget)
+    )
+    .map((result) => normalizeGoWorkUrlFromText(result.url))
+    .filter((url): url is string => Boolean(url))
+    .filter(isUsefulGoWorkProfilePage);
+  const urls = selectedUrls.length > 0 ? selectedUrls : fallbackUrls;
+  const profileId = firstGoWorkProfileId(urls);
+  const filtered = profileId ? urls.filter((url) => extractGoWorkProfileId(url) === profileId) : urls;
+
+  return orderGoWorkPageUrls(uniqueStrings(filtered)).slice(0, MAX_GOWORK_PAGES);
+}
+
+function extractPreferredGoWorkProfileUrl(urls: string[]): string | null {
+  const canonicalProfile = urls.map(normalizeGoWorkProfileBaseUrl).find((url) => {
+    const pathname = new URL(url).pathname;
+    return /,\d+/.test(pathname) && !pathname.includes("opinie_czytaj");
+  });
+
+  return canonicalProfile ?? urls[0] ?? null;
+}
+
+function firstGoWorkProfileId(urls: string[]): string | null {
+  for (const url of urls) {
+    const profileId = extractGoWorkProfileId(url);
+    if (profileId) return profileId;
+  }
+
+  return null;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(value);
+  }
+
+  return result;
 }
 
 function normalizeGoWorkUrlFromText(value: string): string | null {
@@ -256,78 +322,6 @@ function normalizeGoWorkProfileBaseUrl(value: string): string {
   return normalizeGoWorkUrl(url.toString());
 }
 
-function goWorkMatchTokens(companyName: string): string[] {
-  return deriveShortBrandName(companyName)
-    .toLowerCase()
-    .split(/[^a-z0-9ąćęłńóśźż.]+/i)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 3);
-}
-
-function discoverGoWorkPageUrls(
-  profileUrl: string,
-  scrape: { links: string[]; markdown: string; html: string },
-  seedUrls: string[]
-): string[] {
-  const urls = new Set<string>([normalizeGoWorkUrl(profileUrl)]);
-  const profileId = extractGoWorkProfileId(profileUrl);
-  const hrefRegex = /href=["']([^"']+)["']/gi;
-  const canonicalRegex = /<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["'][^>]*>/i;
-  const canonical = scrape.html.match(canonicalRegex)?.[1];
-
-  const candidates = [
-    canonical,
-    ...seedUrls,
-    ...scrape.links,
-    ...extractMarkdownUrls(scrape.markdown),
-    ...extractRegexMatches(scrape.html, hrefRegex),
-  ];
-
-  for (const rawHref of candidates) {
-    if (!rawHref) continue;
-    try {
-      const url = new URL(rawHref, profileUrl);
-      if (!isGoWorkHost(url.hostname)) continue;
-      const normalized = normalizeGoWorkUrl(url.toString());
-      if (!profileId || extractGoWorkProfileId(normalized) !== profileId) continue;
-      if (isUsefulGoWorkProfilePage(normalized)) urls.add(normalized);
-    } catch {
-      // Ignore malformed href values.
-    }
-  }
-
-  const canonicalProfile = Array.from(urls).map(normalizeGoWorkProfileBaseUrl).find((url) => {
-    const pathname = new URL(url).pathname;
-    return /,\d+/.test(pathname) && !pathname.includes("opinie_czytaj");
-  });
-  if (canonicalProfile) {
-    for (const suffix of GOWORK_PAGE_SUFFIXES) {
-      urls.add(`${canonicalProfile.replace(/\/$/, "")}/${suffix}`);
-    }
-  }
-
-  return orderGoWorkPageUrls(Array.from(urls).filter((url) => !isDuplicatedGoWorkSuffixUrl(url))).slice(
-    0,
-    MAX_GOWORK_PAGES
-  );
-}
-
-function extractMarkdownUrls(markdown: string): string[] {
-  return [
-    ...extractRegexMatches(markdown, /\]\(([^)]+)\)/g),
-    ...extractRegexMatches(markdown, /((?:https?:\/\/)?(?:www\.)?gowork\.pl\/[^\s|)\]]+)/gi),
-  ];
-}
-
-function extractRegexMatches(value: string, regex: RegExp): string[] {
-  const matches: string[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(value))) {
-    matches.push(match[1]);
-  }
-  return matches;
-}
-
 function isUsefulGoWorkProfilePage(url: string): boolean {
   const pathname = new URL(url).pathname;
   return (
@@ -351,11 +345,6 @@ function orderGoWorkPageUrls(urls: string[]): string[] {
   };
 
   return urls.sort((a, b) => rank(a) - rank(b));
-}
-
-function isDuplicatedGoWorkSuffixUrl(value: string): boolean {
-  const parts = new URL(value).pathname.split("/").filter(Boolean);
-  return GOWORK_PAGE_SUFFIXES.some((suffix) => parts.filter((part) => part === suffix).length > 1);
 }
 
 function extractGoWorkProfileId(url: string): string | null {
@@ -407,53 +396,19 @@ function normalizeGoWorkEquivalentPageUrl(value: string): string {
 }
 
 function prepareGoWorkText(scrape: FirecrawlScrapeDebug): string {
-  if (!scrape.markdown) return htmlToEssentialText(scrape.html);
-  return markdownToEssentialText(extractRelevantGoWorkMarkdown(scrape.markdown));
+  return markdownToEssentialText(cutGoWorkMarkdownAfterMap(scrape.markdown || scrape.text));
 }
 
-function extractRelevantGoWorkMarkdown(markdown: string): string {
-  const relevantHeadings = [
-    "Dane kontaktowe",
-    "Dane firmowe",
-    "Władze firmy i powiązania",
-    "Przychody i zysk",
-    "Profil działalności",
-    "Opinie",
-    "Pytania",
-    "Rozmowa kwalifikacyjna",
-    "Praca i zarobki",
-    "Zarobki",
-    "Oferty pracy",
-    "Benefity",
-  ];
-  const stopHeadings = [
-    "Mapa",
-    "Sprawdź najnowsze oferty pracy z GoWork.pl",
-    "Firmy i biura",
-    "Aktualne oferty pracy",
-    "Opinie o firmach",
-    "Zostaw merytoryczną opinię",
-  ];
+function cutGoWorkMarkdownAfterMap(markdown: string): string {
   const lines = markdown.split("\n");
-  const chunks: string[] = [];
-  let current: string[] = [];
-  let keeping = false;
+  const result: string[] = [];
 
   for (const line of lines) {
-    const headingMatch = line.match(/^(#{2,6})\s+(.+?)\s*$/);
-    const headingLevel = headingMatch?.[1].length ?? 0;
-    const heading = headingMatch?.[2]?.trim() ?? "";
-    if (heading && headingLevel <= 3) {
-      if (current.length > 0 && keeping) chunks.push(current.join("\n"));
-      current = [];
-      keeping = relevantHeadings.some((name) => heading.toLowerCase().includes(name.toLowerCase()));
-      if (stopHeadings.some((name) => heading.toLowerCase().includes(name.toLowerCase()))) keeping = false;
-    }
-    if (keeping) current.push(line);
+    if (/^#{1,6}\s+Mapa\s*$/i.test(line.trim())) break;
+    result.push(line);
   }
 
-  if (current.length > 0 && keeping) chunks.push(current.join("\n"));
-  return chunks.length > 0 ? chunks.join("\n\n") : markdown;
+  return result.join("\n").trim();
 }
 
 function isGoWorkHost(host: string): boolean {
@@ -524,7 +479,7 @@ function mergeGoWorkFinancials(rows: GoWorkFinancialRow[]): GoWorkFinancialRow[]
   return Array.from(byYear.values());
 }
 
-function extractDeterministicGoWorkData(text: string, html: string): { rows: GoWorkRow[]; financials: GoWorkFinancialRow[] } {
+function extractDeterministicGoWorkData(text: string): { rows: GoWorkRow[]; financials: GoWorkFinancialRow[] } {
   const rows: GoWorkRow[] = [];
   const addRow = (category: string, label: string, value: string, sourceQuote?: string) => {
     const normalizedValue = value.replace(/\s+/g, " ").trim();
@@ -546,9 +501,7 @@ function extractDeterministicGoWorkData(text: string, html: string): { rows: GoW
   addRow(
     "contact",
     "Strona www",
-    extractGoWorkContactWebsiteFromHtml(html) ||
-      extractLabeledWebsite(text) ||
-      extractFirstHttpUrl(text, GOWORK_WEBSITE_EXCLUDED_HOSTS)
+    extractLabeledWebsite(text) || extractFirstHttpUrl(text, GOWORK_WEBSITE_EXCLUDED_HOSTS)
   );
   addRow("profile", "Nazwa pełna", extractMarkdownHeadingValue(text, "Nazwa pełna"));
   addRow("profile", "Adres rejestrowy", extractMarkdownHeadingValue(text, "Adres rejestrowy"));
@@ -573,43 +526,6 @@ function extractLabeledValue(text: string, label: string): string {
     text.match(new RegExp(`\\*\\*${label}:\\*\\*\\s*([0-9]+)`, "i"))?.[1] ??
     extractMarkdownHeadingValue(text, label)
   );
-}
-
-function extractGoWorkContactWebsiteFromHtml(html: string): string {
-  if (!html) return "";
-
-  const contactSection = extractHtmlSection(html, "Dane kontaktowe", "Dane firmowe") || html;
-  const hrefRegex = /<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  let match: RegExpExecArray | null;
-
-  while ((match = hrefRegex.exec(contactSection))) {
-    const href = decodeHtmlEntities(match[1]);
-    const anchorText = htmlToEssentialText(match[2]);
-    if (/^mailto:/i.test(href)) continue;
-
-    const website = extractWebsiteCandidate(`${href} ${anchorText}`);
-    if (website) return website;
-  }
-
-  return "";
-}
-
-function extractHtmlSection(html: string, startText: string, endText: string): string {
-  const startIndex = html.toLowerCase().indexOf(startText.toLowerCase());
-  if (startIndex < 0) return "";
-
-  const afterStart = html.slice(startIndex);
-  const endIndex = afterStart.toLowerCase().indexOf(endText.toLowerCase());
-  return endIndex > 0 ? afterStart.slice(0, endIndex) : afterStart;
-}
-
-function decodeHtmlEntities(value: string): string {
-  return value
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">");
 }
 
 function extractLabeledWebsite(text: string): string {
@@ -745,9 +661,17 @@ interface GoWorkPageExtraction {
   financials?: Array<Partial<GoWorkFinancialRow>>;
 }
 
+interface GoWorkLinkSelection {
+  urls?: string[];
+  reason?: string;
+}
+
 interface GoWorkDebug {
   searchRequest: unknown;
   searchResponse: unknown;
+  linkSelectionRequest?: unknown;
+  linkSelectionResponse?: unknown;
+  linkSelectionRawText?: string;
   skipped?: string;
   discoveredPageUrls?: string[];
   pages?: Array<{
