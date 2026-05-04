@@ -5,13 +5,14 @@ import type { CompanyReport } from "@/lib/types";
 
 export function ReportView({ report }: { report: CompanyReport }) {
   const [debugOpen, setDebugOpen] = useState(false);
-  const [activeTabId, setActiveTabId] = useState("summary");
+  const [activeTabId, setActiveTabId] = useState("profile");
   const registry = report.registry.rows[0] ?? null;
   const reportTitle = registry?.name || report.input.companyName || `NIP ${report.input.nip}`;
   const businessRows = buildBusinessRows(report);
   const structureRows = buildStructureRows(report);
   const presenceRows = buildPresenceRows(report);
-  const websiteRows = buildWebsiteRows(report);
+  const eventsRows = buildEventsRows(report);
+  const jobsRows = buildJobsRows(report);
   const hasFinancials =
     report.goWork.pages.some((page) => page.financials.length > 0) ||
     report.krs?.filings.length > 0;
@@ -21,21 +22,13 @@ export function ReportView({ report }: { report: CompanyReport }) {
     report.googlePlace.positiveReviews.length > 0 ||
     report.googlePlace.negativeReviews.length > 0;
   const tabs = [
-    hasExecutiveOverview(report)
-      ? {
-          id: "summary",
-          title: "Podsumowanie",
-          shortTitle: "Podsumowanie",
-          content: <ExecutiveOverview report={report} />,
-        }
-      : null,
     {
       id: "profile",
       title: "1. Profil firmy",
       shortTitle: "Profil",
       content: <CompanyProfileSection report={report} />,
     },
-    businessRows.length > 0
+    businessRows.length > 0 || report.industryReport
       ? {
           id: "business",
           title: "2. Branża i model działania",
@@ -51,10 +44,26 @@ export function ReportView({ report }: { report: CompanyReport }) {
           content: <StructureSection report={report} rows={structureRows} />,
         }
       : null,
+    eventsRows.length > 0 || hasEventsContent(report)
+      ? {
+          id: "events",
+          title: "4. Bieżące wydarzenia i PR",
+          shortTitle: "Wydarzenia & PR",
+          content: <EventsAndPrSection report={report} rows={eventsRows} />,
+        }
+      : null,
+    jobsRows.length > 0 || hasJobsContent(report)
+      ? {
+          id: "jobs",
+          title: "5. Wakaty i zespół",
+          shortTitle: "Wakaty & zespół",
+          content: <JobsAndTeamSection report={report} rows={jobsRows} />,
+        }
+      : null,
     hasFinancials
       ? {
           id: "financials",
-          title: "4. Finanse i dokumenty",
+          title: "6. Finanse i dokumenty",
           shortTitle: "Finanse",
           content: <FinancialSection report={report} />,
         }
@@ -62,7 +71,7 @@ export function ReportView({ report }: { report: CompanyReport }) {
     presenceRows.length > 0
       ? {
           id: "presence",
-          title: "5. Kontakt i obecność online",
+          title: "7. Kontakt i obecność online",
           shortTitle: "Kontakt",
           content: <PresenceSection report={report} rows={presenceRows} />,
         }
@@ -70,17 +79,9 @@ export function ReportView({ report }: { report: CompanyReport }) {
     hasOpinions
       ? {
           id: "reputation",
-          title: "6. Opinie i reputacja",
+          title: "8. Opinie i reputacja",
           shortTitle: "Opinie",
           content: <ReputationSection report={report} />,
-        }
-      : null,
-    websiteRows.length > 0
-      ? {
-          id: "website",
-          title: "7. Dodatkowe fakty ze strony",
-          shortTitle: "Strona",
-          content: <FactsTable rows={websiteRows} />,
         }
       : null,
   ].filter((tab): tab is ReportTab => tab !== null);
@@ -115,6 +116,9 @@ export function ReportView({ report }: { report: CompanyReport }) {
         </div>
       </div>
 
+      <LeadBriefCard report={report} />
+      {hasExecutiveOverview(report) && <ExecutiveOverview report={report} />}
+
       {activeTab && (
         <>
           <div className="print:hidden">
@@ -144,19 +148,15 @@ export function ReportView({ report }: { report: CompanyReport }) {
           </div>
 
           <div className="print:hidden">
-            {activeTab.id === "summary" ? activeTab.content : <Section title={activeTab.title}>{activeTab.content}</Section>}
+            <Section title={activeTab.title}>{activeTab.content}</Section>
           </div>
 
           <div className="hidden space-y-6 print:block">
-            {tabs.map((tab) =>
-              tab.id === "summary" ? (
-                <div key={tab.id}>{tab.content}</div>
-              ) : (
-                <Section key={tab.id} title={tab.title}>
-                  {tab.content}
-                </Section>
-              )
-            )}
+            {tabs.map((tab) => (
+              <Section key={tab.id} title={tab.title}>
+                {tab.content}
+              </Section>
+            ))}
           </div>
         </>
       )}
@@ -168,6 +168,96 @@ export function ReportView({ report }: { report: CompanyReport }) {
       )}
 
       {debugOpen && <DebugModal report={report} onClose={() => setDebugOpen(false)} />}
+    </div>
+  );
+}
+
+function LeadBriefCard({ report }: { report: CompanyReport }) {
+  const synthesis = report.synthesis;
+  if (!synthesis) return null;
+  const hasAny =
+    Boolean(synthesis.brief) ||
+    synthesis.signals.length > 0 ||
+    synthesis.redFlags.length > 0 ||
+    synthesis.suggestedQuestions.length > 0 ||
+    synthesis.coverageNotes.length > 0;
+  if (!hasAny) return null;
+
+  return (
+    <section className="rounded-lg border border-gray-900 bg-gray-950 p-5 text-gray-50 shadow-sm">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">Brief lead'a</h3>
+          <p className="text-xs text-gray-400">Synteza ze wszystkich źródeł, do skanu w 30 sekund</p>
+        </div>
+      </div>
+
+      {synthesis.brief && (
+        <p className="mb-5 text-sm leading-6 text-gray-100">{synthesis.brief}</p>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {synthesis.signals.length > 0 && (
+          <BriefList
+            title="Sygnały sprzedażowe"
+            tone="signal"
+            items={synthesis.signals}
+          />
+        )}
+        {synthesis.redFlags.length > 0 && (
+          <BriefList
+            title="Czerwone flagi"
+            tone="flag"
+            items={synthesis.redFlags}
+          />
+        )}
+        {synthesis.suggestedQuestions.length > 0 && (
+          <BriefList
+            title="Pytania na rozmowę"
+            tone="question"
+            items={synthesis.suggestedQuestions}
+          />
+        )}
+        {synthesis.coverageNotes.length > 0 && (
+          <BriefList
+            title="Czego brakuje (dopytaj)"
+            tone="note"
+            items={synthesis.coverageNotes}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function BriefList({
+  title,
+  items,
+  tone,
+}: {
+  title: string;
+  items: string[];
+  tone: "signal" | "flag" | "question" | "note";
+}) {
+  const palette: Record<typeof tone, { dot: string; box: string }> = {
+    signal: { dot: "bg-emerald-400", box: "border-emerald-500/30 bg-emerald-500/5" },
+    flag: { dot: "bg-red-400", box: "border-red-500/40 bg-red-500/5" },
+    question: { dot: "bg-blue-400", box: "border-blue-500/30 bg-blue-500/5" },
+    note: { dot: "bg-amber-300", box: "border-amber-500/30 bg-amber-500/5" },
+  };
+  const { dot, box } = palette[tone];
+
+  return (
+    <div className={`rounded-md border ${box} p-3`}>
+      <p className="mb-2 text-sm font-semibold text-gray-50">{title}</p>
+      <ul className="space-y-2 text-sm leading-6 text-gray-200">
+        {items.map((item, index) => (
+          <li key={index} className="flex gap-2">
+            <span className={`mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -285,13 +375,125 @@ function CompanyProfileSection({ report }: { report: CompanyReport }) {
   );
 }
 
-function BusinessSection({ report, rows }: { report: CompanyReport; rows: FactRow[] }) {
-  const activities = uniqueActivities(report.krs?.activities ?? []);
-  const industryReport = report.industryReport;
+function EventsAndPrSection({ report, rows }: { report: CompanyReport; rows: FactRow[] }) {
+  const newsRows = perplexityRowsToFactRows(report.companyNews?.rows ?? [], "Wydarzenia (research)");
+  const prRows = perplexityRowsToFactRows(report.mediaPr?.rows ?? [], "Media i PR (research)");
+  const krsChanges = krsFactsToRows(report.krs?.recentChanges ?? []);
+  const transformations = krsFactsToRows(report.krs?.transformations ?? []);
+  const recentEvents = (report.companyPages?.recentEvents ?? []).slice(0, 12);
+  const merged = uniqueFactRows([...rows, ...newsRows, ...prRows, ...krsChanges, ...transformations]);
 
   return (
     <div className="space-y-5">
-      <FactsTable rows={rows} />
+      {recentEvents.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-900">Z podstron firmowych (kariera/news/blog)</p>
+          <ul className="space-y-1 text-sm text-gray-700">
+            {recentEvents.map((event, index) => (
+              <li key={index} className="flex gap-2">
+                <span className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />
+                <span>{event}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {merged.length > 0 ? (
+        <FactsTable rows={merged} />
+      ) : (
+        <div className="text-sm text-gray-500">Brak publicznych wydarzeń, fuzji ani aktywności PR-owej znalezionej w researchu.</div>
+      )}
+    </div>
+  );
+}
+
+function JobsAndTeamSection({ report, rows }: { report: CompanyReport; rows: FactRow[] }) {
+  const teamRows = perplexityRowsToFactRows(report.jobsTeam?.rows ?? [], "Zespół i wakaty (research)");
+  const merged = uniqueFactRows([...rows, ...teamRows]);
+  const openJobs = (report.companyPages?.openJobs ?? []).slice(0, 12);
+  const board = report.krs?.boardMembers ?? [];
+  const supervisory = report.krs?.supervisoryBoardMembers ?? [];
+
+  return (
+    <div className="space-y-5">
+      {openJobs.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-gray-900">Aktualne wakaty (ze strony firmowej)</p>
+          <ul className="space-y-1 text-sm text-gray-700">
+            {openJobs.map((job, index) => (
+              <li key={index} className="flex gap-2">
+                <span className="mt-2 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                <span>{job}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {merged.length > 0 && <FactsTable rows={merged} />}
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        {board.length > 0 && <PeopleTable title="Zarząd / reprezentacja" people={board} />}
+        {supervisory.length > 0 && <PeopleTable title="Rada nadzorcza / organ nadzoru" people={supervisory} />}
+      </div>
+    </div>
+  );
+}
+
+function hasEventsContent(report: CompanyReport): boolean {
+  return (
+    (report.companyNews?.rows?.length ?? 0) > 0 ||
+    (report.mediaPr?.rows?.length ?? 0) > 0 ||
+    (report.companyPages?.recentEvents?.length ?? 0) > 0 ||
+    (report.krs?.recentChanges?.length ?? 0) > 0 ||
+    (report.krs?.transformations?.length ?? 0) > 0
+  );
+}
+
+function hasJobsContent(report: CompanyReport): boolean {
+  return (
+    (report.jobsTeam?.rows?.length ?? 0) > 0 ||
+    (report.companyPages?.openJobs?.length ?? 0) > 0 ||
+    (report.krs?.boardMembers?.length ?? 0) > 0 ||
+    (report.krs?.supervisoryBoardMembers?.length ?? 0) > 0
+  );
+}
+
+function perplexityRowsToFactRows(
+  rows: Array<{ category: string; value: string; source: string }>,
+  fallbackCategory: string
+): FactRow[] {
+  return rows
+    .filter((row) => row.value && !/^brak$/i.test(row.category) && !/^nie znaleziono$/i.test(row.value))
+    .map((row) => ({
+      category: row.category || fallbackCategory,
+      label: row.category || fallbackCategory,
+      value: row.source ? `${row.value} (${row.source})` : row.value,
+    }));
+}
+
+function buildEventsRows(report: CompanyReport): FactRow[] {
+  return uniqueFactRows([
+    ...perplexityRowsToFactRows(report.companyNews?.rows ?? [], "Wydarzenia"),
+    ...perplexityRowsToFactRows(report.mediaPr?.rows ?? [], "Media / PR"),
+  ]);
+}
+
+function buildJobsRows(report: CompanyReport): FactRow[] {
+  return uniqueFactRows(perplexityRowsToFactRows(report.jobsTeam?.rows ?? [], "Zespół / wakaty"));
+}
+
+function BusinessSection({ report, rows }: { report: CompanyReport; rows: FactRow[] }) {
+  const activities = uniqueActivities(report.krs?.activities ?? []);
+  const industryReport = report.industryReport;
+  const marketRows = uniqueFactRows(
+    perplexityRowsToFactRows(report.marketPosition?.rows ?? [], "Pozycja rynkowa")
+  );
+  const merged = uniqueFactRows([...rows, ...marketRows]);
+
+  return (
+    <div className="space-y-5">
+      <FactsTable rows={merged} />
       {industryReport && (
         <div className="space-y-3">
           <p className="text-sm font-medium text-gray-900">Raport z branży</p>
@@ -306,8 +508,20 @@ function BusinessSection({ report, rows }: { report: CompanyReport; rows: FactRo
                   <Cell strong>Kontekst organizacyjny</Cell>
                   <Cell>{industryReport.organizationalContext}</Cell>
                 </tr>
+                {industryReport.buyingCommittee && (
+                  <tr className="align-top">
+                    <Cell strong>Komitet zakupowy w branży</Cell>
+                    <Cell>{industryReport.buyingCommittee}</Cell>
+                  </tr>
+                )}
+                {industryReport.marketingBudgetHeuristic && (
+                  <tr className="align-top">
+                    <Cell strong>Budżet marketingowy (heurystyka)</Cell>
+                    <Cell>{industryReport.marketingBudgetHeuristic}</Cell>
+                  </tr>
+                )}
                 <tr className="align-top">
-                  <Cell strong>Komentarz</Cell>
+                  <Cell strong>Komentarz dla handlowca</Cell>
                   <Cell>{industryReport.geminiComment}</Cell>
                 </tr>
                 <tr className="align-top">
@@ -351,23 +565,12 @@ function BusinessSection({ report, rows }: { report: CompanyReport; rows: FactRo
 function StructureSection({ report, rows }: { report: CompanyReport; rows: FactRow[] }) {
   return (
     <div className="space-y-5">
-      <FactsTable rows={rows} />
-      <div className="grid gap-5 lg:grid-cols-2">
-        {report.krs?.boardMembers.length > 0 && (
-          <PeopleTable title="Zarząd / reprezentacja" people={report.krs.boardMembers} />
-        )}
-        {report.krs?.supervisoryBoardMembers.length > 0 && (
-          <PeopleTable title="Rada nadzorcza / organ nadzoru" people={report.krs.supervisoryBoardMembers} />
-        )}
-      </div>
+      {rows.length > 0 && <FactsTable rows={rows} />}
       {report.krs?.shareholders.length > 0 && (
         <FactsTable title="Struktura własnościowa" rows={krsFactsToRows(report.krs.shareholders)} />
       )}
       {report.krs?.branches.length > 0 && (
         <FactsTable title="Oddziały / obszar działania" rows={krsFactsToRows(report.krs.branches)} />
-      )}
-      {report.krs?.transformations.length > 0 && (
-        <FactsTable title="Fuzje, przejęcia, przekształcenia" rows={krsFactsToRows(report.krs.transformations)} />
       )}
     </div>
   );
@@ -439,10 +642,20 @@ function FinancialSection({ report }: { report: CompanyReport }) {
 function PresenceSection({ report, rows }: { report: CompanyReport; rows: FactRow[] }) {
   const digitalRows = uniqueDigitalRows(report.digitalPresence.rows);
   const openingHours = uniqueStrings(report.googlePlace.openingHours);
+  const whois = report.whois;
+  const whoisRows: FactRow[] = whois && whois.status === "found"
+    ? uniqueFactRows([
+        row("Domena", "Adres", whois.domain),
+        row("Domena", "Data rejestracji domeny", whois.registrationDate),
+        row("Domena", "Ostatnia zmiana", whois.lastChanged),
+        row("Domena", "Wygasa", whois.expirationDate),
+        row("Domena", "Rejestrator", whois.registrar),
+      ])
+    : [];
 
   return (
     <div className="space-y-5">
-      <FactsTable rows={rows} />
+      <FactsTable rows={uniqueFactRows([...rows, ...whoisRows])} />
 
       {digitalRows.length > 0 && (
         <div className="space-y-2">
@@ -612,48 +825,26 @@ function buildProfileRows(report: CompanyReport): FactRow[] {
     row("Rejestr", "Kapitał zakładowy", registry?.shareCapital || getKrsFact(report, "Kapitał zakładowy")),
     row("Adres", "Siedziba", getKrsFact(report, "Siedziba")),
     row("Adres", "Adres rejestrowy", registry?.address || getKrsFact(report, "Adres")),
-    row("Kontakt", "Strona WWW", firstValue(getKrsFact(report, "WWW według KRS"), report.websiteFacts?.url, report.googlePlace.websiteUri)),
-    row("Zmiany", "Ostatni wpis KRS", [
-      getKrsFact(report, "Data ostatniego wpisu"),
-      getKrsFact(report, "Sygnatura ostatniego wpisu"),
-    ].filter(Boolean).join(" - ")),
   ]);
 }
 
 function buildBusinessRows(report: CompanyReport): FactRow[] {
   const registry = report.registry.rows[0];
-  const websiteFacts = report.websiteFacts?.facts ?? [];
-  const selectedWebsiteFacts = websiteFacts.filter((fact) =>
-    includesAny(`${fact.category} ${fact.label}`, [
-      "branża",
-      "specjalizacja",
-      "model",
-      "rynek",
-      "obszar",
-      "produkt",
-      "usług",
-      "opis działalności",
-      "business_description",
-    ])
-  );
-
   return uniqueFactRows([
     row("Branża", "Główna działalność", registry?.mainActivity),
     ...krsFactsToRows(report.krs?.facts.filter((fact) =>
-      ["Czas na jaki utworzono podmiot", "Sposób powstania", "Opis powstania"].includes(fact.label)
+      ["Czas na jaki utworzony podmiot", "Czas na jaki utworzono podmiot", "Sposób powstania", "Opis powstania"].includes(fact.label)
     ) ?? []),
-    ...selectedWebsiteFacts.map((fact) => row(fact.category || "Strona firmowa", fact.label || fact.category, fact.value)),
   ]);
 }
 
 function buildStructureRows(report: CompanyReport): FactRow[] {
   const krsFacts = report.krs?.facts ?? [];
-  return uniqueFactRows([
-    ...krsFactsToRows(krsFacts.filter((fact) =>
+  return uniqueFactRows(
+    krsFactsToRows(krsFacts.filter((fact) =>
       ["Sposób reprezentacji", "Liczba akcji/udziałów", "Wartość jednej akcji/udziału"].includes(fact.label)
-    )),
-    ...krsFactsToRows(report.krs?.recentChanges ?? []),
-  ]);
+    ))
+  );
 }
 
 function buildPresenceRows(report: CompanyReport): FactRow[] {
@@ -667,25 +858,6 @@ function buildPresenceRows(report: CompanyReport): FactRow[] {
     row("Lokalizacja", "Status Google", place.businessStatus),
     row("Reputacja", "Ocena Google Maps", formatRating(place.rating, place.reviewCount)),
   ]);
-}
-
-function buildWebsiteRows(report: CompanyReport): FactRow[] {
-  const alreadyShown = new Set([
-    "branża",
-    "specjalizacja",
-    "model",
-    "rynek",
-    "obszar",
-    "produkt",
-    "usług",
-    "opis działalności",
-    "business_description",
-  ]);
-  return uniqueFactRows(
-    (report.websiteFacts?.facts ?? [])
-      .filter((fact) => !Array.from(alreadyShown).some((term) => `${fact.category} ${fact.label}`.toLowerCase().includes(term)))
-      .map((fact) => row(fact.category || "Strona firmowa", fact.label || fact.category, fact.value))
-  );
 }
 
 function krsFactsToRows(facts: Array<{ category: string; label: string; value: string }>): FactRow[] {

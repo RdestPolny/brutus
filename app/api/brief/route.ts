@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   askPerplexityTableWithDebug,
+  buildCompanyNewsPrompt,
   buildDigitalPresencePrompt,
   buildIndustryReportPrompt,
+  buildJobsTeamPrompt,
+  buildMarketPositionPrompt,
+  buildMediaPrPrompt,
 } from "@/lib/perplexity";
 import { askGeminiJsonWithDebug } from "@/lib/gemini";
 import { parseMarkdownTable, pickValue } from "@/lib/markdownTable";
@@ -11,7 +15,19 @@ import { fetchWebsiteDigitalPresence, mergeDigitalPresenceRows } from "@/lib/web
 import { fetchGoWorkReportWithDebug } from "@/lib/gowork";
 import { extractWebsiteFactsWithDebug } from "@/lib/websiteFacts";
 import { fetchKrsReportWithDebug, mergeRegistryRowsWithKrs } from "@/lib/krs";
-import type { ApiDebugStep, CompanyRegistryRow, DigitalPresenceRow, GoWorkReport, IndustryReport, KrsReport, PerplexityFactRow } from "@/lib/types";
+import { fetchWhoisReportWithDebug } from "@/lib/whois";
+import { fetchCompanyPagesWithDebug } from "@/lib/companyPages";
+import { synthesizeLeadWithDebug } from "@/lib/synthesis";
+import type {
+  ApiDebugStep,
+  CompanyRegistryRow,
+  DigitalPresenceRow,
+  GoWorkReport,
+  IndustryReport,
+  KrsReport,
+  PerplexityFactRow,
+  PerplexityResearchSection,
+} from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -50,17 +66,72 @@ export async function POST(req: NextRequest) {
     const firstRegistryRow = registryRows[0];
     const goWorkWebsite = extractWebsiteFromGoWork(goWork);
     const krsWebsite = extractWebsiteFromKrs(krsResult.report);
+    const resolvedWebsite = officialWebsite;
+    const companyName = firstRegistryRow.name || nip;
 
     const digitalPresencePrompt = buildDigitalPresencePrompt(nip, {
       officialWebsite,
       krs: firstRegistryRow.krs || undefined,
     });
-    const digitalPresenceResult = await askPerplexityTableWithDebug(digitalPresencePrompt);
+    const industryPrompt = buildIndustryReportPrompt({
+      companyName,
+      nip,
+      mainActivity: firstRegistryRow.mainActivity || undefined,
+    });
+    const companyNewsPrompt = buildCompanyNewsPrompt({ companyName, nip, officialWebsite });
+    const mediaPrPrompt = buildMediaPrPrompt({ companyName, nip, officialWebsite });
+    const jobsTeamPrompt = buildJobsTeamPrompt({ companyName, nip, officialWebsite });
+    const marketPositionPrompt = buildMarketPositionPrompt({
+      companyName,
+      nip,
+      officialWebsite,
+      mainActivity: firstRegistryRow.mainActivity || undefined,
+    });
+
+    const [
+      digitalPresenceResult,
+      industryPerplexityResult,
+      companyNewsResult,
+      mediaPrResult,
+      jobsTeamResult,
+      marketPositionResult,
+      websiteFactsResult,
+      websitePresenceResult,
+      whoisResult,
+      companyPagesResult,
+      googlePlaceResult,
+    ] = await Promise.all([
+      askPerplexityTableWithDebug(digitalPresencePrompt),
+      askPerplexityTableWithDebug(industryPrompt),
+      askPerplexityTableWithDebug(companyNewsPrompt),
+      askPerplexityTableWithDebug(mediaPrPrompt),
+      askPerplexityTableWithDebug(jobsTeamPrompt),
+      askPerplexityTableWithDebug(marketPositionPrompt),
+      extractWebsiteFactsWithDebug(resolvedWebsite),
+      fetchWebsiteDigitalPresence(resolvedWebsite),
+      fetchWhoisReportWithDebug(resolvedWebsite),
+      fetchCompanyPagesWithDebug(resolvedWebsite),
+      fetchBestGooglePlaceReportWithDebug(
+        buildPlacesQueries({
+          nip,
+          companyName: firstRegistryRow.name,
+          registryRows,
+          goWorkRegistryRows,
+          krsReport: krsResult.report,
+        })
+      ),
+    ]);
+
+    const placesQueries = buildPlacesQueries({
+      nip,
+      companyName: firstRegistryRow.name,
+      registryRows,
+      goWorkRegistryRows,
+      krsReport: krsResult.report,
+    });
+
     const digitalPresenceMarkdown = digitalPresenceResult.content;
     const perplexityDigitalRows = parseDigitalPresenceRows(digitalPresenceMarkdown);
-    const resolvedWebsite = officialWebsite;
-    const websiteFactsResult = await extractWebsiteFactsWithDebug(resolvedWebsite);
-    const websitePresenceResult = await fetchWebsiteDigitalPresence(resolvedWebsite);
     const digitalPresenceRows = mergeDigitalPresenceRows(
       perplexityDigitalRows,
       websitePresenceResult.rows
@@ -73,34 +144,39 @@ export async function POST(req: NextRequest) {
       summary: websiteFactsResult.summary,
       validation: null,
     };
-    const industryPrompt = buildIndustryReportPrompt({
-      companyName: firstRegistryRow.name || nip,
-      nip,
-      mainActivity: firstRegistryRow.mainActivity || undefined,
-      websiteSummary: websiteFacts.summary || undefined,
-    });
-    const industryPerplexityResult = await askPerplexityTableWithDebug(industryPrompt);
+
     const industryGeminiResult = await askGeminiJsonWithDebug<IndustryReport>(
       buildIndustryGeminiPrompt({
-        companyName: firstRegistryRow.name || nip,
+        companyName,
         mainActivity: firstRegistryRow.mainActivity,
         perplexityMarkdown: industryPerplexityResult.content,
       }),
       {
         systemInstruction:
-          "Redagujesz syntetyczny raport branżowy po polsku. Korzystasz wyłącznie z przekazanego researchu i dodajesz ostrożny komentarz analityczny.",
+          "Redagujesz syntetyczny raport branżowy po polsku dla handlowca agencji marketingowej. Korzystasz wyłącznie z przekazanego researchu i dodajesz ostrożny komentarz analityczny.",
       }
     );
     const industryReport = normalizeIndustryReport(industryGeminiResult.content);
 
-    const placesQueries = buildPlacesQueries({
-      nip,
-      companyName: firstRegistryRow.name,
-      registryRows,
-      goWorkRegistryRows,
-      krsReport: krsResult.report,
+    const companyNews = perplexitySection(companyNewsResult.content);
+    const mediaPr = perplexitySection(mediaPrResult.content);
+    const jobsTeam = perplexitySection(jobsTeamResult.content);
+    const marketPosition = perplexitySection(marketPositionResult.content);
+
+    const synthesisResult = await synthesizeLeadWithDebug({
+      registry: firstRegistryRow ?? null,
+      websiteFacts,
+      whois: whoisResult.report,
+      industryReport,
+      companyNews,
+      mediaPr,
+      jobsTeam,
+      marketPosition,
+      companyPages: companyPagesResult.report,
+      goWork,
+      krs: krsResult.report,
+      googlePlace: googlePlaceResult.report,
     });
-    const googlePlaceResult = await fetchBestGooglePlaceReportWithDebug(placesQueries);
 
     return NextResponse.json({
       input: { nip, companyName: firstRegistryRow.name || undefined, officialWebsite },
@@ -119,6 +195,13 @@ export async function POST(req: NextRequest) {
       },
       websiteFacts,
       industryReport,
+      companyNews,
+      mediaPr,
+      jobsTeam,
+      marketPosition,
+      whois: whoisResult.report,
+      companyPages: companyPagesResult.report,
+      synthesis: synthesisResult.synthesis,
       goWork,
       krs: krsResult.report,
       googlePlace: googlePlaceResult.report,
@@ -159,6 +242,24 @@ export async function POST(req: NextRequest) {
           googlePlacesRequest: googlePlaceResult.request,
           googlePlacesResponse: googlePlaceResult.response,
           resolvedWebsite,
+          companyNewsRequest: companyNewsResult.request,
+          companyNewsResponse: companyNewsResult.response,
+          companyNewsMarkdown: companyNewsResult.content,
+          mediaPrRequest: mediaPrResult.request,
+          mediaPrResponse: mediaPrResult.response,
+          mediaPrMarkdown: mediaPrResult.content,
+          jobsTeamRequest: jobsTeamResult.request,
+          jobsTeamResponse: jobsTeamResult.response,
+          jobsTeamMarkdown: jobsTeamResult.content,
+          marketPositionRequest: marketPositionResult.request,
+          marketPositionResponse: marketPositionResult.response,
+          marketPositionMarkdown: marketPositionResult.content,
+          whoisRequest: whoisResult.request,
+          whoisResponse: whoisResult.response,
+          companyPagesDebug: companyPagesResult.debug,
+          synthesisRequest: synthesisResult.request,
+          synthesisResponse: synthesisResult.response,
+          synthesisRawText: synthesisResult.rawText,
         }),
       },
     });
@@ -167,6 +268,13 @@ export async function POST(req: NextRequest) {
     console.error("[brief] error:", err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+function perplexitySection(markdown: string): PerplexityResearchSection {
+  return {
+    rawMarkdown: markdown,
+    rows: parsePerplexityFactRows(markdown),
+  };
 }
 
 function buildDebugSteps({
@@ -187,6 +295,24 @@ function buildDebugSteps({
   googlePlacesRequest,
   googlePlacesResponse,
   resolvedWebsite,
+  companyNewsRequest,
+  companyNewsResponse,
+  companyNewsMarkdown,
+  mediaPrRequest,
+  mediaPrResponse,
+  mediaPrMarkdown,
+  jobsTeamRequest,
+  jobsTeamResponse,
+  jobsTeamMarkdown,
+  marketPositionRequest,
+  marketPositionResponse,
+  marketPositionMarkdown,
+  whoisRequest,
+  whoisResponse,
+  companyPagesDebug,
+  synthesisRequest,
+  synthesisResponse,
+  synthesisRawText,
 }: {
   goWorkDebug: {
     searchRequest?: unknown;
@@ -230,6 +356,24 @@ function buildDebugSteps({
   googlePlacesRequest: unknown;
   googlePlacesResponse: unknown;
   resolvedWebsite: string | null;
+  companyNewsRequest: unknown;
+  companyNewsResponse: unknown;
+  companyNewsMarkdown: string;
+  mediaPrRequest: unknown;
+  mediaPrResponse: unknown;
+  mediaPrMarkdown: string;
+  jobsTeamRequest: unknown;
+  jobsTeamResponse: unknown;
+  jobsTeamMarkdown: string;
+  marketPositionRequest: unknown;
+  marketPositionResponse: unknown;
+  marketPositionMarkdown: string;
+  whoisRequest: unknown;
+  whoisResponse: unknown;
+  companyPagesDebug: unknown;
+  synthesisRequest: unknown;
+  synthesisResponse: unknown;
+  synthesisRawText: string;
 }): ApiDebugStep[] {
   const steps: ApiDebugStep[] = [];
 
@@ -333,6 +477,48 @@ function buildDebugSteps({
     response: googlePlacesResponse,
   });
 
+  steps.push({
+    name: "Perplexity: bieżące wydarzenia firmy",
+    request: companyNewsRequest,
+    response: { markdown: companyNewsMarkdown, apiResponse: companyNewsResponse },
+  });
+
+  steps.push({
+    name: "Perplexity: media i PR",
+    request: mediaPrRequest,
+    response: { markdown: mediaPrMarkdown, apiResponse: mediaPrResponse },
+  });
+
+  steps.push({
+    name: "Perplexity: wakaty i zespół",
+    request: jobsTeamRequest,
+    response: { markdown: jobsTeamMarkdown, apiResponse: jobsTeamResponse },
+  });
+
+  steps.push({
+    name: "Perplexity: pozycja rynkowa",
+    request: marketPositionRequest,
+    response: { markdown: marketPositionMarkdown, apiResponse: marketPositionResponse },
+  });
+
+  steps.push({
+    name: "RDAP: WHOIS domeny",
+    request: whoisRequest,
+    response: whoisResponse,
+  });
+
+  steps.push({
+    name: "Firecrawl + Gemini: podstrony firmowe (kariera/news/blog)",
+    request: { resolvedWebsite },
+    response: companyPagesDebug,
+  });
+
+  steps.push({
+    name: "Gemini: synteza lead briefu",
+    request: synthesisRequest,
+    response: { rawText: synthesisRawText, apiResponse: synthesisResponse },
+  });
+
   return steps;
 }
 
@@ -348,21 +534,23 @@ function buildIndustryGeminiPrompt({
   return `Firma: ${companyName}
 ${mainActivity ? `Główna działalność / PKD: ${mainActivity}` : ""}
 
-Na podstawie researchu Perplexity przygotuj krótki, konkretny raport branżowy.
+Na podstawie researchu Perplexity przygotuj zwięzły raport branżowy. Pomóż handlowcowi agencji marketingowej zrozumieć kontekst zakupowy.
 
 Zwróć WYŁĄCZNIE poprawny JSON:
 {
-  "standardPurchaseProcessDuration": "standardowy czas trwania procesu zakupu w tej branży",
-  "organizationalContext": "aktualne i najważniejsze wyzwanie branży",
-  "geminiComment": "komentarz analityczny: co to oznacza dla sprzedaży/ryzyka współpracy z taką firmą",
-  "sources": "krótkie źródła lub uwagi z researchu"
+  "standardPurchaseProcessDuration": "Typowy czas zakupu B2B w tej branży, z przedziałami jeśli różny dla różnych typów zamówień (max 2 zdania)",
+  "organizationalContext": "Najważniejsze aktualne wyzwanie branży na PL (regulacje, AI, konkurencja, kadry, presja kosztowa) - max 3 zdania",
+  "buyingCommittee": "Kto typowo decyduje o zakupie usług marketingowych w tej branży (CEO/właściciel/CMO/dyrektor sprzedaży) - max 2 zdania",
+  "marketingBudgetHeuristic": "Czy firmy z tej branży/wielkości typowo prowadzą roczny budżet marketingowy, agencja na retainerze, czy ad-hoc; rząd wielkości miesięcznych wydatków - max 2 zdania",
+  "geminiComment": "Co to oznacza dla naszej oferty agencji marketingowej (ryzyko, szansa, na co zwrócić uwagę w rozmowie) - max 3 zdania",
+  "sources": "Krótkie źródła lub uwagi z researchu"
 }
 
 Zasady:
 - Pisz po polsku.
 - Nie dodawaj faktów spoza researchu.
 - Jeśli research jest niejednoznaczny, użyj ostrożnych sformułowań i wskaż niepewność.
-- Każde pole ma być zwięzłe, maksymalnie 2-4 zdania.
+- Bez ogólników typu "to zależy" bez dookreślenia.
 
 RESEARCH PERPLEXITY:
 ${perplexityMarkdown}`;
@@ -373,6 +561,8 @@ function normalizeIndustryReport(report: IndustryReport | null): IndustryReport 
   const normalized = {
     standardPurchaseProcessDuration: String(report.standardPurchaseProcessDuration ?? "").trim(),
     organizationalContext: String(report.organizationalContext ?? "").trim(),
+    buyingCommittee: String(report.buyingCommittee ?? "").trim(),
+    marketingBudgetHeuristic: String(report.marketingBudgetHeuristic ?? "").trim(),
     geminiComment: String(report.geminiComment ?? "").trim(),
     sources: String(report.sources ?? "").trim(),
   };

@@ -298,14 +298,129 @@ Przygotuj research branżowy dla tej firmy i zwróć tabelę Markdown:
 Pytanie | Odpowiedź | Źródła / uwagi
 
 Odpowiedz na dokładnie te pytania:
-1. Standardowy czas trwania procesu zakupu w tej branży.
-2. Kontekst organizacyjny: aktualne i najważniejsze wyzwanie branży, np. duża konkurencja, rozdrobnienie rynku, monopolista, nowe regulacje/projekty ustaw, zagrożenie przez AI lub inne istotne zjawisko.
+1. Standardowy czas trwania procesu zakupu B2B w tej branży (od pierwszego kontaktu do podpisania umowy). Jeśli różny dla różnych typów zamówień, podaj dwa-trzy przedziały.
+2. Najważniejsze wyzwanie branży na polskim rynku w 2025-2026: konkurencja, rozdrobnienie, monopolista, nowe regulacje/projekty ustaw, zagrożenie przez AI, presja kosztowa, niedobór kadr lub inne istotne zjawisko.
+3. Komitet zakupowy w tej branży: kto typowo decyduje o zakupie usług/rozwiązań marketingowych (CMO, CEO/właściciel, dyrektor sprzedaży, brand manager, specjalista marketingu)? Czy decyzje są scentralizowane czy regionalne?
+4. Heurystyka budżetu marketingowego: czy firmy z tej branży/wielkości typowo prowadzą roczny budżet marketingowy, działają ad-hoc, czy mają zwykle agencję na retainerze? Jaki rząd wielkości miesięcznych wydatków na marketing zewnętrzny jest typowy?
 
 Zasady:
 - Odpowiedzi mają dotyczyć branży firmy, nie wyłącznie samej firmy.
-- Podawaj ostrożne przedziały czasu, jeśli nie ma jednej wartości.
-- Uwzględnij polski rynek, jeśli firma działa lokalnie w Polsce.
+- Podawaj ostrożne przedziały, jeśli nie ma jednej wartości.
+- Polski rynek priorytet.
 - Nie dodawaj tekstu poza tabelą.`;
+}
+
+export function buildCompanyNewsPrompt(context: {
+  companyName: string;
+  nip: string;
+  officialWebsite?: string | null;
+}): string {
+  return `Firma: ${context.companyName} (NIP: ${context.nip})${context.officialWebsite ? `\nStrona: ${context.officialWebsite}` : ''}
+
+Znajdź BIEŻĄCE WYDARZENIA dotyczące tej konkretnej firmy z ostatnich 12 miesięcy i zwróć tabelę:
+Kategoria | Wartość | Źródło / Uwagi
+
+Sprawdź następujące kategorie i dla każdej wpisz osobny wiersz (jeśli znaleziono):
+- "Dofinansowanie / inwestycja" - granty, dotacje, runda finansowania, NCBR/PARP/UE
+- "Fuzja / przejęcie" - akwizycje przez/firmy lub przez tę firmę
+- "Nowy oddział / lokalizacja" - otwarcie biura, ekspansja geograficzna
+- "Nowy produkt / usługa" - launch produktu, nowa linia biznesowa, rebranding
+- "Nowy katalog / oferta" - publikacja katalogu produktowego, prezentacja oferty
+- "Zmiana zarządu" - nowy CEO, dyrektor sprzedaży, dyrektor marketingu
+- "Sprzedaż / wykup akcji" - zmiana struktury własnościowej
+- "Strata kluczowego klienta / kontrakt" - publicznie znane straty
+- "Restrukturyzacja / redukcja etatów" - jeśli komunikowane publicznie
+- "Nowa strona internetowa / rebranding" - widoczne zmiany w komunikacji
+
+Zasady:
+- TYLKO tej firmy, nie ogólnie branży.
+- TYLKO ostatnie 12 miesięcy. Każdy wiersz zawiera datę lub okres.
+- W "Źródło / Uwagi" podaj konkretne źródło: nazwę portalu, datę, link.
+- Jeśli kategorii brak - POMIŃ wiersz całkowicie. NIE wpisuj "nie znaleziono".
+- Jeśli żadne wydarzenie nie zostało znalezione, zwróć tabelę z jednym wierszem: "Brak | Nie znaleziono publicznych wydarzeń z 12 mc | Sprawdzono media i komunikaty firmowe".`;
+}
+
+export function buildMediaPrPrompt(context: {
+  companyName: string;
+  nip: string;
+  officialWebsite?: string | null;
+}): string {
+  return `Firma: ${context.companyName} (NIP: ${context.nip})${context.officialWebsite ? `\nStrona: ${context.officialWebsite}` : ''}
+
+Znajdź WZMIANKI MEDIOWE i aktywność PR-ową tej firmy z ostatnich 18 miesięcy. Tabela:
+Kategoria | Wartość | Źródło / Uwagi
+
+Kategorie do sprawdzenia (osobny wiersz dla każdej znalezionej):
+- "Artykuł prasowy" - wzmianki w mediach branżowych, biznesowych, ogólnopolskich (max 3 najważniejsze, po dacie)
+- "Wywiad / komentarz eksperta" - wypowiedzi przedstawicieli firmy w mediach
+- "Współpraca z twórcą / influencerem" - kampanie z liderami opinii lub Internetu
+- "Ambasador marki" - oficjalny ambasador (sportowiec, celebryta, ekspert)
+- "Sponsoring / wsparcie" - eventy, drużyny, fundacje
+- "Wystąpienie na targach / konferencji" - jako prelegent lub wystawca, ostatnie 12 mc
+- "Targi międzynarodowe" - obecność na zagranicznych imprezach branżowych
+- "Własny event firmowy" - konferencja, premiera, gala organizowana przez firmę
+- "Nagroda / wyróżnienie" - awards, ranking branżowy
+- "Kontrowersja / krytyka medialna" - jeśli istnieje publiczna krytyka
+
+Zasady:
+- W "Wartość" krótki opis (max 25 słów).
+- W "Źródło / Uwagi" - portal, data, link.
+- TYLKO tej firmy. POMIŃ wiersze "nie znaleziono".
+- Jeśli nic - zwróć: "Brak | Nie znaleziono publicznej aktywności PR | Sprawdzono media branżowe i ogólne".`;
+}
+
+export function buildJobsTeamPrompt(context: {
+  companyName: string;
+  nip: string;
+  officialWebsite?: string | null;
+}): string {
+  return `Firma: ${context.companyName} (NIP: ${context.nip})${context.officialWebsite ? `\nStrona: ${context.officialWebsite}` : ''}
+
+Znajdź AKTUALNE WAKATY i informacje o ZESPOLE MARKETINGOWO-SPRZEDAŻOWYM tej firmy. Tabela:
+Kategoria | Wartość | Źródło / Uwagi
+
+Kategorie:
+- "Wakat" - osobny wiersz dla każdego aktualnie otwartego stanowiska (max 8). Format Wartość: "Stanowisko - Lokalizacja - Forma (etat/B2B/zlecenie) jeśli widoczna". Sprawdź pracuj.pl, NoFluff Jobs, JustJoin.IT, LinkedIn Jobs, gowork, stronę firmową /kariera.
+- "Wielkość zatrudnienia" - widełki etatów (np. "11-50", "51-200") z LinkedIn / GoWork / KRS.
+- "Dyrektor sprzedaży / Head of Sales" - imię, nazwisko, źródło (LinkedIn, strona firmowa).
+- "Dyrektor marketingu / CMO" - jw.
+- "Specjalista marketingu / marketing manager" - jw.
+- "Struktura sprzedaży" - informacja czy firma ma przedstawicieli handlowych, struktury regionalne, KAM-ów (jeśli wynika z opisu firmy lub wakatów).
+- "Niedawna zmiana kadrowa" - publicznie ogłoszona zmiana w zarządzie / dziale sprzedaży lub marketingu w ostatnich 12 mc.
+
+Zasady:
+- W "Źródło / Uwagi" konkretny link i data, jeśli możliwe.
+- POMIŃ wiersze "nie znaleziono". Jeśli nic - zwróć: "Brak | Nie znaleziono publicznych wakatów ani danych o zespole | Sprawdzono pracuj.pl, NoFluff, LinkedIn, stronę firmową".
+- NIE zgaduj imion, jeśli nie ma publicznego potwierdzenia.`;
+}
+
+export function buildMarketPositionPrompt(context: {
+  companyName: string;
+  nip: string;
+  mainActivity?: string;
+  officialWebsite?: string | null;
+}): string {
+  return `Firma: ${context.companyName} (NIP: ${context.nip})${context.officialWebsite ? `\nStrona: ${context.officialWebsite}` : ''}${context.mainActivity ? `\nDziałalność: ${context.mainActivity}` : ''}
+
+Znajdź informacje o POZYCJI RYNKOWEJ I OBECNEJ SYTUACJI tej firmy. Tabela:
+Kategoria | Wartość | Źródło / Uwagi
+
+Kategorie:
+- "Obszar działania" - lokalny / krajowy / międzynarodowy (lista krajów jeśli eksport)
+- "Kluczowi klienci" - znane case studies, referencje, wymienione na stronie lub w mediach (max 5)
+- "Główni konkurenci w PL" - 3-5 firm z tej samej branży (lista)
+- "Partnerzy strategiczni" - wymienieni publicznie (technologiczni, dystrybucyjni)
+- "Aktualna agencja marketingowa / SEO / PR" - z którą firmą obecnie pracuje (jeśli publicznie znane: case study agencji, wzmianka w PR)
+- "Wcześniejsze kampanie / wdrożenia podobnego rozwiązania" - czy firma robiła już kampanie marketingowe / SEO / SEM widoczne w wyszukiwarce, social media ads
+- "Aktualna sytuacja" - świeże sygnały: ekspansja, kłopoty, zmiana strategii, nowi inwestorzy (ostatnie 6 mc)
+- "Model biznesowy" - sprzedaż jednorazowa / SaaS / prowizje / produkcja na zamówienie / B2B / B2C / hybrid
+- "Nadchodzące wydarzenia" - konferencje, targi, nowe produkty zapowiedziane na najbliższe 6 mc
+
+Zasady:
+- POMIŃ wiersze "nie znaleziono".
+- W "Źródło / Uwagi" konkretne źródła i daty.
+- TYLKO tej firmy. Konkurentów wyszukaj w polskich rankingach branżowych lub Google.
+- Jeśli nic - zwróć: "Brak | Nie znaleziono publicznych danych | Sprawdzono media, case studies, social media".`;
 }
 
 export function buildLegalPrompt(nip: string, context?: { krs?: string }): string {

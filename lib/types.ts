@@ -180,8 +180,47 @@ export interface ApiDebugStep {
 export interface IndustryReport {
   standardPurchaseProcessDuration: string;
   organizationalContext: string;
+  buyingCommittee: string;
+  marketingBudgetHeuristic: string;
   geminiComment: string;
   sources: string;
+}
+
+export interface PerplexityResearchSection {
+  rawMarkdown: string;
+  rows: PerplexityFactRow[];
+}
+
+export interface WhoisReport {
+  domain: string | null;
+  registrationDate: string | null;
+  lastChanged: string | null;
+  expirationDate: string | null;
+  registrar: string | null;
+  status: "found" | "not_found" | "error" | "skipped";
+  message: string | null;
+}
+
+export interface CompanyPageScrape {
+  kind: "careers" | "news" | "blog" | "about" | "case_studies" | "other";
+  url: string;
+  title: string;
+  highlights: string[];
+}
+
+export interface CompanyPagesReport {
+  discovered: string[];
+  pages: CompanyPageScrape[];
+  openJobs: string[];
+  recentEvents: string[];
+}
+
+export interface LeadSynthesis {
+  brief: string;
+  signals: string[];
+  redFlags: string[];
+  suggestedQuestions: string[];
+  coverageNotes: string[];
 }
 
 export interface CompanyReport {
@@ -201,6 +240,13 @@ export interface CompanyReport {
   };
   websiteFacts: WebsiteFactsReport;
   industryReport: IndustryReport | null;
+  companyNews: PerplexityResearchSection;
+  mediaPr: PerplexityResearchSection;
+  jobsTeam: PerplexityResearchSection;
+  marketPosition: PerplexityResearchSection;
+  whois: WhoisReport | null;
+  companyPages: CompanyPagesReport | null;
+  synthesis: LeadSynthesis | null;
   goWork: GoWorkReport;
   krs: KrsReport;
   googlePlace: GooglePlaceReport;
