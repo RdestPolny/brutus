@@ -211,6 +211,7 @@ export interface CompanyReport {
     digitalPresenceRawResponse: unknown;
     websitePresenceRawResponse: unknown;
     placesQuery: string;
+    placesQueries?: string[];
     placesRawResponse: unknown;
     officialWebsite: string | null;
     resolvedWebsite: string | null;

@@ -23,6 +23,61 @@ export async function fetchGooglePlaceReport(query: string): Promise<GooglePlace
   return lookup.report;
 }
 
+export async function fetchBestGooglePlaceReportWithDebug(
+  queries: string[]
+): Promise<{ report: GooglePlaceReport; request: unknown; response: unknown; selectedQuery: string | null }> {
+  const uniqueQueries = uniquePlaceQueries(queries);
+  if (uniqueQueries.length === 0) {
+    return {
+      report: emptyGooglePlaceReport(),
+      request: { queries: [] },
+      response: { error: "No Google Places queries provided" },
+      selectedQuery: null,
+    };
+  }
+
+  const lookups = await Promise.all(
+    uniqueQueries.map(async (query) => {
+      try {
+        const lookup = await fetchGooglePlaceReportWithDebug(query);
+        return { query, ...lookup };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown Google Places error";
+        return {
+          query,
+          report: emptyGooglePlaceReport(),
+          request: { query },
+          response: { error: message },
+        };
+      }
+    })
+  );
+  const bestLookup = lookups
+    .slice()
+    .sort((a, b) => comparePlaceReports(b.report, a.report))[0];
+
+  return {
+    report: bestLookup.report,
+    request: {
+      queries: uniqueQueries,
+      selectedQuery: bestLookup.query,
+      lookups: lookups.map((lookup) => ({ query: lookup.query, request: lookup.request })),
+    },
+    response: {
+      selectedQuery: bestLookup.query,
+      lookups: lookups.map((lookup) => ({
+        query: lookup.query,
+        reviewCount: lookup.report.reviewCount,
+        rating: lookup.report.rating,
+        name: lookup.report.name,
+        address: lookup.report.address,
+        response: lookup.response,
+      })),
+    },
+    selectedQuery: bestLookup.query,
+  };
+}
+
 export async function fetchGooglePlaceReportWithDebug(
   query: string
 ): Promise<{ report: GooglePlaceReport; request: unknown; response: unknown }> {
@@ -83,7 +138,7 @@ async function fetchNewPlaces(
   const placesData = data as PlacesSearchResponse;
 
   if (!res.ok) return { report: emptyGooglePlaceReport(), request, response };
-  const place = placesData?.places?.[0];
+  const place = pickBestNewPlace(placesData?.places ?? []);
   if (!place) return { report: emptyGooglePlaceReport(), request, response };
 
   return {
@@ -135,7 +190,8 @@ async function fetchLegacyPlaces(
     ok: textSearchRes.ok,
     body: textSearchData,
   };
-  const placeId = textSearchData?.results?.[0]?.place_id;
+  const textSearchPlace = pickBestLegacyTextSearchPlace(textSearchData?.results ?? []);
+  const placeId = textSearchPlace?.place_id;
 
   if (!textSearchRes.ok || !placeId) {
     return {
@@ -244,6 +300,45 @@ function splitReviews(reviews: PlaceReview[]): Pick<GooglePlaceReport, "reviews"
   };
 }
 
+function uniquePlaceQueries(queries: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const query of queries) {
+    const cleaned = query.replace(/\s+/g, " ").trim();
+    const key = cleaned.toLowerCase();
+    if (!cleaned || seen.has(key)) continue;
+    seen.add(key);
+    result.push(cleaned);
+  }
+
+  return result;
+}
+
+function comparePlaceReports(a: GooglePlaceReport, b: GooglePlaceReport): number {
+  const aReviews = a.reviewCount ?? a.reviews.length;
+  const bReviews = b.reviewCount ?? b.reviews.length;
+  if (aReviews !== bReviews) return aReviews - bReviews;
+
+  const aRating = a.rating ?? -1;
+  const bRating = b.rating ?? -1;
+  if (aRating !== bRating) return aRating - bRating;
+
+  return Number(Boolean(a.name || a.mapsUrl || a.address)) - Number(Boolean(b.name || b.mapsUrl || b.address));
+}
+
+function pickBestNewPlace(places: NonNullable<PlacesSearchResponse["places"]>) {
+  return places
+    .slice()
+    .sort((a, b) => (b.userRatingCount ?? -1) - (a.userRatingCount ?? -1))[0];
+}
+
+function pickBestLegacyTextSearchPlace(places: NonNullable<LegacyTextSearchResponse["results"]>) {
+  return places
+    .slice()
+    .sort((a, b) => (b.user_ratings_total ?? -1) - (a.user_ratings_total ?? -1))[0];
+}
+
 function parseJsonOrRawText(rawText: string): unknown {
   try {
     return JSON.parse(rawText);
@@ -284,6 +379,8 @@ interface NewPlacesRequest {
 interface LegacyTextSearchResponse {
   results?: Array<{
     place_id?: string;
+    rating?: number;
+    user_ratings_total?: number;
   }>;
 }
 

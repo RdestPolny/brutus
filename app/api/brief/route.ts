@@ -4,7 +4,7 @@ import {
   buildDigitalPresencePrompt,
 } from "@/lib/perplexity";
 import { parseMarkdownTable, pickValue } from "@/lib/markdownTable";
-import { fetchGooglePlaceReportWithDebug } from "@/lib/places";
+import { fetchBestGooglePlaceReportWithDebug } from "@/lib/places";
 import { fetchWebsiteDigitalPresence, mergeDigitalPresenceRows } from "@/lib/website";
 import { fetchGoWorkReportWithDebug } from "@/lib/gowork";
 import { extractWebsiteFactsWithDebug } from "@/lib/websiteFacts";
@@ -69,10 +69,14 @@ export async function POST(req: NextRequest) {
       validation: null,
     };
 
-    const placesQuery = [firstRegistryRow.name || nip, firstRegistryRow.address]
-      .filter(Boolean)
-      .join(" ");
-    const googlePlaceResult = await fetchGooglePlaceReportWithDebug(placesQuery);
+    const placesQueries = buildPlacesQueries({
+      nip,
+      companyName: firstRegistryRow.name,
+      registryRows,
+      goWorkRegistryRows,
+      krsReport: krsResult.report,
+    });
+    const googlePlaceResult = await fetchBestGooglePlaceReportWithDebug(placesQueries);
 
     return NextResponse.json({
       input: { nip, companyName: firstRegistryRow.name || undefined },
@@ -101,7 +105,8 @@ export async function POST(req: NextRequest) {
         digitalPresenceResponse: digitalPresenceMarkdown,
         digitalPresenceRawResponse: digitalPresenceResult.response,
         websitePresenceRawResponse: websitePresenceResult.debug,
-        placesQuery,
+        placesQuery: googlePlaceResult.selectedQuery ?? placesQueries[0] ?? "",
+        placesQueries,
         placesRawResponse: googlePlaceResult.response,
         officialWebsite: resolvedWebsite,
         resolvedWebsite,
@@ -132,7 +137,7 @@ export async function POST(req: NextRequest) {
             response: websitePresenceResult.debug,
           },
           {
-            name: "Google Places: searchText",
+            name: "Google Places: searchText (wybór po liczbie opinii)",
             request: googlePlaceResult.request,
             response: googlePlaceResult.response,
           },
@@ -144,6 +149,49 @@ export async function POST(req: NextRequest) {
     console.error("[brief] error:", err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+function buildPlacesQueries({
+  nip,
+  companyName,
+  registryRows,
+  goWorkRegistryRows,
+  krsReport,
+}: {
+  nip: string;
+  companyName: string;
+  registryRows: CompanyRegistryRow[];
+  goWorkRegistryRows: CompanyRegistryRow[];
+  krsReport: KrsReport;
+}): string[] {
+  const name = companyName || registryRows[0]?.name || goWorkRegistryRows[0]?.name || nip;
+  const addressCandidates = [
+    ...registryRows.map((row) => row.address),
+    ...goWorkRegistryRows.map((row) => row.address),
+    krsReport.facts.find((fact) => fact.label === "Adres")?.value,
+    krsReport.facts.find((fact) => fact.label === "Siedziba")?.value,
+  ];
+  const queries = addressCandidates
+    .map((address) => [name, address].filter(Boolean).join(" "))
+    .filter(Boolean);
+
+  if (queries.length === 0) queries.push(name);
+  return uniqueStrings(queries);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const cleaned = value.replace(/\s+/g, " ").trim();
+    const key = cleaned.toLowerCase();
+    if (!cleaned || seen.has(key)) continue;
+    seen.add(key);
+    result.push(cleaned);
+  }
+
+  return result;
 }
 
 function normalizeNip(value: unknown): string | null {

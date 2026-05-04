@@ -5,6 +5,7 @@ import type { CompanyReport } from "@/lib/types";
 
 export function ReportView({ report }: { report: CompanyReport }) {
   const [debugOpen, setDebugOpen] = useState(false);
+  const [activeTabId, setActiveTabId] = useState("summary");
   const registry = report.registry.rows[0] ?? null;
   const reportTitle = registry?.name || report.input.companyName || `NIP ${report.input.nip}`;
   const businessRows = buildBusinessRows(report);
@@ -19,6 +20,71 @@ export function ReportView({ report }: { report: CompanyReport }) {
     report.googlePlace.reviews.length > 0 ||
     report.googlePlace.positiveReviews.length > 0 ||
     report.googlePlace.negativeReviews.length > 0;
+  const tabs = [
+    hasExecutiveOverview(report)
+      ? {
+          id: "summary",
+          title: "Podsumowanie",
+          shortTitle: "Podsumowanie",
+          content: <ExecutiveOverview report={report} />,
+        }
+      : null,
+    {
+      id: "profile",
+      title: "1. Profil firmy",
+      shortTitle: "Profil",
+      content: <CompanyProfileSection report={report} />,
+    },
+    businessRows.length > 0
+      ? {
+          id: "business",
+          title: "2. Branża i model działania",
+          shortTitle: "Branża",
+          content: <BusinessSection report={report} rows={businessRows} />,
+        }
+      : null,
+    structureRows.length > 0
+      ? {
+          id: "structure",
+          title: "3. Struktura i decyzje",
+          shortTitle: "Struktura",
+          content: <StructureSection report={report} rows={structureRows} />,
+        }
+      : null,
+    hasFinancials
+      ? {
+          id: "financials",
+          title: "4. Finanse i dokumenty",
+          shortTitle: "Finanse",
+          content: <FinancialSection report={report} />,
+        }
+      : null,
+    presenceRows.length > 0
+      ? {
+          id: "presence",
+          title: "5. Kontakt i obecność online",
+          shortTitle: "Kontakt",
+          content: <PresenceSection report={report} rows={presenceRows} />,
+        }
+      : null,
+    hasOpinions
+      ? {
+          id: "reputation",
+          title: "6. Opinie i reputacja",
+          shortTitle: "Opinie",
+          content: <ReputationSection report={report} />,
+        }
+      : null,
+    websiteRows.length > 0
+      ? {
+          id: "website",
+          title: "7. Dodatkowe fakty ze strony",
+          shortTitle: "Strona",
+          content: <FactsTable rows={websiteRows} />,
+        }
+      : null,
+  ].filter((tab): tab is ReportTab => tab !== null);
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0] ?? null;
 
   return (
     <div className="space-y-6">
@@ -49,51 +115,55 @@ export function ReportView({ report }: { report: CompanyReport }) {
         </div>
       </div>
 
-      <ExecutiveOverview report={report} />
+      {activeTab && (
+        <>
+          <div className="print:hidden">
+            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white p-1">
+              <div role="tablist" aria-label="Sekcje raportu" className="flex min-w-max gap-1">
+                {tabs.map((tab) => {
+                  const isActive = tab.id === activeTab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      onClick={() => setActiveTabId(tab.id)}
+                      className={`rounded-md px-3 py-2 text-sm font-medium transition ${
+                        isActive
+                          ? "bg-gray-950 text-white shadow-sm"
+                          : "text-gray-600 hover:bg-gray-100 hover:text-gray-950"
+                      }`}
+                    >
+                      {tab.shortTitle}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
 
-      <Section title="1. Profil firmy">
-        <CompanyProfileSection report={report} />
-      </Section>
+          <div className="print:hidden">
+            {activeTab.id === "summary" ? activeTab.content : <Section title={activeTab.title}>{activeTab.content}</Section>}
+          </div>
 
-      {businessRows.length > 0 && (
-        <Section title="2. Branża i model działania">
-          <BusinessSection report={report} rows={businessRows} />
-        </Section>
-      )}
-
-      {structureRows.length > 0 && (
-        <Section title="3. Struktura i decyzje">
-          <StructureSection report={report} rows={structureRows} />
-        </Section>
-      )}
-
-      {hasFinancials && (
-        <Section title="4. Finanse i dokumenty">
-          <FinancialSection report={report} />
-        </Section>
-      )}
-
-      {presenceRows.length > 0 && (
-        <Section title="5. Kontakt i obecność online">
-          <PresenceSection report={report} rows={presenceRows} />
-        </Section>
-      )}
-
-      {hasOpinions && (
-        <Section title="6. Opinie i reputacja">
-          <ReputationSection report={report} />
-        </Section>
-      )}
-
-      {websiteRows.length > 0 && (
-        <Section title="7. Dodatkowe fakty ze strony">
-          <FactsTable rows={websiteRows} />
-        </Section>
+          <div className="hidden space-y-6 print:block">
+            {tabs.map((tab) =>
+              tab.id === "summary" ? (
+                <div key={tab.id}>{tab.content}</div>
+              ) : (
+                <Section key={tab.id} title={tab.title}>
+                  {tab.content}
+                </Section>
+              )
+            )}
+          </div>
+        </>
       )}
 
       {registry?.name && (
         <p className="text-xs text-gray-400 print:hidden">
-          Zapytanie Google Places: {[registry.name, registry.address].filter(Boolean).join(" ")}
+          Zapytanie Google Places: {report.debug?.placesQuery || [registry.name, registry.address].filter(Boolean).join(" ")}
         </p>
       )}
 
@@ -168,6 +238,29 @@ function ExecutiveOverview({ report }: { report: CompanyReport }) {
       )}
     </section>
   );
+}
+
+type ReportTab = {
+  id: string;
+  title: string;
+  shortTitle: string;
+  content: React.ReactElement;
+};
+
+function hasExecutiveOverview(report: CompanyReport): boolean {
+  const financials = uniqueFinancials(report.goWork.pages.flatMap((page) => page.financials));
+  const goWorkReviews = uniqueGoWorkReviews(report.goWork.pages.flatMap((page) => page.reviews));
+  const googlePlace = report.googlePlace;
+  const latestFinancial = latestFinancialRow(financials);
+  const hasCards =
+    googlePlace.rating !== null ||
+    goWorkReviews.length > 0 ||
+    Boolean(latestFinancial?.revenue) ||
+    Boolean(latestFinancial?.grossProfit);
+  const hasFinancialChart = financials.some((row) => row.year && (row.revenue || row.grossProfit));
+  const hasSentiment = goWorkReviews.length > 0 || googlePlace.reviews.length > 0;
+
+  return hasCards || hasFinancialChart || hasSentiment;
 }
 
 type FactRow = {
@@ -1351,7 +1444,7 @@ function summarizeGoWorkSentiment(
   const assessment = cautiousSentimentAssessment(counts, uniqueReviews.length);
   const sample = pickRiskSample(uniqueReviews);
 
-  return `Próba GoWork: ${uniqueReviews.length} wpisów. Rozkład: ${formatSentimentCounts(counts)}. Ocena ostrożna: ${assessment}. ${sample ? `Istotny sygnał: ${shortenText(sample, 150)}` : "Próbka jest ograniczona i może nie być reprezentatywna."}`;
+  return `Próba GoWork: ${uniqueReviews.length} wpisów. Rozkład: ${formatSentimentCounts(counts)}. Ocena ostrożna: ${assessment}. ${sample ? `Istotny sygnał: ${sample}` : "Próbka jest ograniczona i może nie być reprezentatywna."}`;
 }
 
 function summarizeGoogleSentiment(reviews: Array<{ rating: number | null; text: string }>): string {
@@ -1364,7 +1457,7 @@ function summarizeGoogleSentiment(reviews: Array<{ rating: number | null; text: 
   const average = rated.length > 0 ? rated.reduce((sum, review) => sum + (review.rating ?? 0), 0) / rated.length : null;
   const sample = reviews.find((review) => (review.rating ?? 5) <= 2 && review.text)?.text ?? reviews.find((review) => review.text)?.text ?? "";
 
-  return `Próba Google Maps: ${total} opinii${average !== null ? `, średnia ${average.toFixed(1)}/5` : ""}. Rozkład: ${positive} pozytywne, ${neutral} neutralne, ${negative} negatywne. To sygnał z małej próbki, nie pełny obraz reputacji.${sample ? ` Przykład: ${shortenText(sample, 140)}` : ""}`;
+  return `Próba Google Maps: ${total} opinii${average !== null ? `, średnia ${average.toFixed(1)}/5` : ""}. Rozkład: ${positive} pozytywne, ${neutral} neutralne, ${negative} negatywne. To sygnał z małej próbki, nie pełny obraz reputacji.${sample ? ` Przykład: ${sample}` : ""}`;
 }
 
 function formatSentimentCounts(counts: Record<"positive" | "negative" | "neutral" | "unknown", number>): string {
