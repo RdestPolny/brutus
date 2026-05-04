@@ -177,6 +177,13 @@ export interface ApiDebugStep {
   response: unknown;
 }
 
+export interface IndustryReport {
+  standardPurchaseProcessDuration: string;
+  organizationalContext: string;
+  geminiComment: string;
+  sources: string;
+}
+
 export interface CompanyReport {
   input: ReportInput;
   generatedAt: string;
@@ -193,6 +200,7 @@ export interface CompanyReport {
     rows: PerplexityFactRow[];
   };
   websiteFacts: WebsiteFactsReport;
+  industryReport: IndustryReport | null;
   goWork: GoWorkReport;
   krs: KrsReport;
   googlePlace: GooglePlaceReport;

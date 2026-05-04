@@ -287,10 +287,38 @@ function CompanyProfileSection({ report }: { report: CompanyReport }) {
 
 function BusinessSection({ report, rows }: { report: CompanyReport; rows: FactRow[] }) {
   const activities = uniqueActivities(report.krs?.activities ?? []);
+  const industryReport = report.industryReport;
 
   return (
     <div className="space-y-5">
       <FactsTable rows={rows} />
+      {industryReport && (
+        <div className="space-y-3">
+          <p className="text-sm font-medium text-gray-900">Raport z branży</p>
+          <div className="overflow-x-auto">
+            <table className="min-w-full border-separate border-spacing-0 text-sm">
+              <tbody>
+                <tr className="align-top">
+                  <Cell strong>Standardowy czas procesu zakupu</Cell>
+                  <Cell>{industryReport.standardPurchaseProcessDuration}</Cell>
+                </tr>
+                <tr className="align-top">
+                  <Cell strong>Kontekst organizacyjny</Cell>
+                  <Cell>{industryReport.organizationalContext}</Cell>
+                </tr>
+                <tr className="align-top">
+                  <Cell strong>Komentarz</Cell>
+                  <Cell>{industryReport.geminiComment}</Cell>
+                </tr>
+                <tr className="align-top">
+                  <Cell strong>Źródła / uwagi</Cell>
+                  <Cell>{industryReport.sources}</Cell>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       {activities.length > 0 && (
         <div className="space-y-2">
           <p className="text-sm font-medium text-gray-900">PKD</p>
@@ -596,7 +624,17 @@ function buildBusinessRows(report: CompanyReport): FactRow[] {
   const registry = report.registry.rows[0];
   const websiteFacts = report.websiteFacts?.facts ?? [];
   const selectedWebsiteFacts = websiteFacts.filter((fact) =>
-    includesAny(`${fact.category} ${fact.label}`, ["branża", "specjalizacja", "model", "rynek", "obszar", "produkt", "usług"])
+    includesAny(`${fact.category} ${fact.label}`, [
+      "branża",
+      "specjalizacja",
+      "model",
+      "rynek",
+      "obszar",
+      "produkt",
+      "usług",
+      "opis działalności",
+      "business_description",
+    ])
   );
 
   return uniqueFactRows([
@@ -640,6 +678,8 @@ function buildWebsiteRows(report: CompanyReport): FactRow[] {
     "obszar",
     "produkt",
     "usług",
+    "opis działalności",
+    "business_description",
   ]);
   return uniqueFactRows(
     (report.websiteFacts?.facts ?? [])
@@ -1588,6 +1628,7 @@ function DebugModal({ report, onClose }: { report: CompanyReport; onClose: () =>
                     value={{
                       registry: report.registry,
                       websiteFacts: report.websiteFacts,
+                      industryReport: report.industryReport,
                       digitalPresence: report.digitalPresence,
                       goWork: report.goWork,
                       googlePlace: report.googlePlace,

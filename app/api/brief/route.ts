@@ -2,14 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   askPerplexityTableWithDebug,
   buildDigitalPresencePrompt,
+  buildIndustryReportPrompt,
 } from "@/lib/perplexity";
+import { askGeminiJsonWithDebug } from "@/lib/gemini";
 import { parseMarkdownTable, pickValue } from "@/lib/markdownTable";
 import { fetchBestGooglePlaceReportWithDebug } from "@/lib/places";
 import { fetchWebsiteDigitalPresence, mergeDigitalPresenceRows } from "@/lib/website";
 import { fetchGoWorkReportWithDebug } from "@/lib/gowork";
 import { extractWebsiteFactsWithDebug } from "@/lib/websiteFacts";
 import { fetchKrsReportWithDebug, mergeRegistryRowsWithKrs } from "@/lib/krs";
-import type { ApiDebugStep, CompanyRegistryRow, DigitalPresenceRow, GoWorkReport, KrsReport, PerplexityFactRow } from "@/lib/types";
+import type { ApiDebugStep, CompanyRegistryRow, DigitalPresenceRow, GoWorkReport, IndustryReport, KrsReport, PerplexityFactRow } from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -71,6 +73,25 @@ export async function POST(req: NextRequest) {
       summary: websiteFactsResult.summary,
       validation: null,
     };
+    const industryPrompt = buildIndustryReportPrompt({
+      companyName: firstRegistryRow.name || nip,
+      nip,
+      mainActivity: firstRegistryRow.mainActivity || undefined,
+      websiteSummary: websiteFacts.summary || undefined,
+    });
+    const industryPerplexityResult = await askPerplexityTableWithDebug(industryPrompt);
+    const industryGeminiResult = await askGeminiJsonWithDebug<IndustryReport>(
+      buildIndustryGeminiPrompt({
+        companyName: firstRegistryRow.name || nip,
+        mainActivity: firstRegistryRow.mainActivity,
+        perplexityMarkdown: industryPerplexityResult.content,
+      }),
+      {
+        systemInstruction:
+          "Redagujesz syntetyczny raport branżowy po polsku. Korzystasz wyłącznie z przekazanego researchu i dodajesz ostrożny komentarz analityczny.",
+      }
+    );
+    const industryReport = normalizeIndustryReport(industryGeminiResult.content);
 
     const placesQueries = buildPlacesQueries({
       nip,
@@ -97,6 +118,7 @@ export async function POST(req: NextRequest) {
         rows: [],
       },
       websiteFacts,
+      industryReport,
       goWork,
       krs: krsResult.report,
       googlePlace: googlePlaceResult.report,
@@ -108,6 +130,10 @@ export async function POST(req: NextRequest) {
         digitalPresenceResponse: digitalPresenceMarkdown,
         digitalPresenceRawResponse: digitalPresenceResult.response,
         websitePresenceRawResponse: websitePresenceResult.debug,
+        industryPerplexityPrompt: industryPrompt,
+        industryPerplexityResponse: industryPerplexityResult.content,
+        industryPerplexityRawResponse: industryPerplexityResult.response,
+        industryGeminiRawResponse: industryGeminiResult.response,
         placesQuery: googlePlaceResult.selectedQuery ?? placesQueries[0] ?? "",
         placesQueries,
         placesRawResponse: googlePlaceResult.response,
@@ -124,6 +150,12 @@ export async function POST(req: NextRequest) {
           digitalPresenceMarkdown,
           websiteFactsDebug: websiteFactsResult.debug,
           websitePresenceDebug: websitePresenceResult.debug,
+          industryPerplexityRequest: industryPerplexityResult.request,
+          industryPerplexityResponse: industryPerplexityResult.response,
+          industryPerplexityMarkdown: industryPerplexityResult.content,
+          industryGeminiRequest: industryGeminiResult.request,
+          industryGeminiResponse: industryGeminiResult.response,
+          industryGeminiRawText: industryGeminiResult.rawText,
           googlePlacesRequest: googlePlaceResult.request,
           googlePlacesResponse: googlePlaceResult.response,
           resolvedWebsite,
@@ -146,6 +178,12 @@ function buildDebugSteps({
   digitalPresenceMarkdown,
   websiteFactsDebug,
   websitePresenceDebug,
+  industryPerplexityRequest,
+  industryPerplexityResponse,
+  industryPerplexityMarkdown,
+  industryGeminiRequest,
+  industryGeminiResponse,
+  industryGeminiRawText,
   googlePlacesRequest,
   googlePlacesResponse,
   resolvedWebsite,
@@ -183,6 +221,12 @@ function buildDebugSteps({
     extractionRawText?: string;
   };
   websitePresenceDebug: unknown;
+  industryPerplexityRequest: unknown;
+  industryPerplexityResponse: unknown;
+  industryPerplexityMarkdown: string;
+  industryGeminiRequest: unknown;
+  industryGeminiResponse: unknown;
+  industryGeminiRawText: string;
   googlePlacesRequest: unknown;
   googlePlacesResponse: unknown;
   resolvedWebsite: string | null;
@@ -266,12 +310,74 @@ function buildDebugSteps({
   });
 
   steps.push({
+    name: "Perplexity: raport z branży",
+    request: industryPerplexityRequest,
+    response: {
+      markdown: industryPerplexityMarkdown,
+      apiResponse: industryPerplexityResponse,
+    },
+  });
+
+  steps.push({
+    name: "Gemini: redakcja raportu z branży",
+    request: industryGeminiRequest,
+    response: {
+      rawText: industryGeminiRawText,
+      apiResponse: industryGeminiResponse,
+    },
+  });
+
+  steps.push({
     name: "Google Places: searchText",
     request: googlePlacesRequest,
     response: googlePlacesResponse,
   });
 
   return steps;
+}
+
+function buildIndustryGeminiPrompt({
+  companyName,
+  mainActivity,
+  perplexityMarkdown,
+}: {
+  companyName: string;
+  mainActivity: string;
+  perplexityMarkdown: string;
+}): string {
+  return `Firma: ${companyName}
+${mainActivity ? `Główna działalność / PKD: ${mainActivity}` : ""}
+
+Na podstawie researchu Perplexity przygotuj krótki, konkretny raport branżowy.
+
+Zwróć WYŁĄCZNIE poprawny JSON:
+{
+  "standardPurchaseProcessDuration": "standardowy czas trwania procesu zakupu w tej branży",
+  "organizationalContext": "aktualne i najważniejsze wyzwanie branży",
+  "geminiComment": "komentarz analityczny: co to oznacza dla sprzedaży/ryzyka współpracy z taką firmą",
+  "sources": "krótkie źródła lub uwagi z researchu"
+}
+
+Zasady:
+- Pisz po polsku.
+- Nie dodawaj faktów spoza researchu.
+- Jeśli research jest niejednoznaczny, użyj ostrożnych sformułowań i wskaż niepewność.
+- Każde pole ma być zwięzłe, maksymalnie 2-4 zdania.
+
+RESEARCH PERPLEXITY:
+${perplexityMarkdown}`;
+}
+
+function normalizeIndustryReport(report: IndustryReport | null): IndustryReport | null {
+  if (!report) return null;
+  const normalized = {
+    standardPurchaseProcessDuration: String(report.standardPurchaseProcessDuration ?? "").trim(),
+    organizationalContext: String(report.organizationalContext ?? "").trim(),
+    geminiComment: String(report.geminiComment ?? "").trim(),
+    sources: String(report.sources ?? "").trim(),
+  };
+
+  return Object.values(normalized).some(Boolean) ? normalized : null;
 }
 
 function buildPlacesQueries({

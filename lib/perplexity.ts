@@ -283,6 +283,31 @@ Dla każdego źródła:
 - Max 5 najważniejszych wyników`;
 }
 
+export function buildIndustryReportPrompt(context: {
+  companyName: string;
+  nip: string;
+  mainActivity?: string;
+  websiteSummary?: string;
+}): string {
+  return `Firma: ${context.companyName}
+NIP: ${context.nip}
+${context.mainActivity ? `Główna działalność / PKD: ${context.mainActivity}` : ''}
+${context.websiteSummary ? `Opis ze strony firmowej: ${context.websiteSummary}` : ''}
+
+Przygotuj research branżowy dla tej firmy i zwróć tabelę Markdown:
+Pytanie | Odpowiedź | Źródła / uwagi
+
+Odpowiedz na dokładnie te pytania:
+1. Standardowy czas trwania procesu zakupu w tej branży.
+2. Kontekst organizacyjny: aktualne i najważniejsze wyzwanie branży, np. duża konkurencja, rozdrobnienie rynku, monopolista, nowe regulacje/projekty ustaw, zagrożenie przez AI lub inne istotne zjawisko.
+
+Zasady:
+- Odpowiedzi mają dotyczyć branży firmy, nie wyłącznie samej firmy.
+- Podawaj ostrożne przedziały czasu, jeśli nie ma jednej wartości.
+- Uwzględnij polski rynek, jeśli firma działa lokalnie w Polsce.
+- Nie dodawaj tekstu poza tabelą.`;
+}
+
 export function buildLegalPrompt(nip: string, context?: { krs?: string }): string {
   return `NIP: ${nip}${context?.krs ? `, KRS ${context.krs}` : ''}
 
