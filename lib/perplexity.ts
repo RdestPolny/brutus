@@ -158,17 +158,18 @@ export function buildDigitalPresencePrompt(
   return `Firma: NIP ${nip}${context?.krs ? `, KRS ${context.krs}` : ''}${context?.companyName ? `, ${context.companyName}` : ''}
 ${context?.officialWebsite ? `Oficjalna strona: ${context.officialWebsite}` : ''}
 
-Znajdź oficjalne profile firmy i zwróć tabelę:
+Znajdź oficjalne profile social media firmy i zwróć tabelę:
 Platforma | Adres URL | Metryki
 
 Platformy do sprawdzenia:
-- Strona WWW (jeśli nie podana wcześniej)
 - Facebook (facebook.com)
 - Instagram (instagram.com)
 - LinkedIn (linkedin.com/company)
 - YouTube (youtube.com)
 - TikTok (tiktok.com)
 - X/Twitter (x.com lub twitter.com)
+
+Nie wyszukuj oficjalnej strony WWW firmy. Jeśli podano ją powyżej, użyj jej wyłącznie jako kontekstu do walidacji profili social media.
 
 WYSZUKIWANIE - użyj tych zapytań:
 ${searchTerms.map(term => `- "${term}"`).join('\n')}
@@ -182,8 +183,6 @@ METRYKI (kolumna "Metryki"):
 - Dla social media: liczba followersów/obserwujących jeśli widoczna publicznie
 - Format: np. "1,2K obserwujących", "350 followersów", "5K subskrybentów"
 - Jeśli profil istnieje ale liczba ukryta: "profil aktywny, metryki niepubliczne"
-- Dla strony WWW: data ostatniej aktualizacji lub "aktywna" jeśli świeża
-
 Jeśli platformy nie ma, pomiń wiersz całkowicie.`;
 }
 

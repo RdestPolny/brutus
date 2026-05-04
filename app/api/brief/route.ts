@@ -42,18 +42,18 @@ export async function POST(req: NextRequest) {
     const krsResult = await fetchKrsReportWithDebug(krsSeedRow?.krs ?? "");
     const registryRows = mergeRegistryRowsWithKrs(goWorkRegistryRows, krsResult.report);
     const firstRegistryRow = registryRows[0];
+    const goWorkWebsite = extractWebsiteFromGoWork(goWork);
+    const krsWebsite = extractWebsiteFromKrs(krsResult.report);
+    const officialWebsite = goWorkWebsite ?? krsWebsite;
 
     const digitalPresencePrompt = buildDigitalPresencePrompt(nip, {
-      officialWebsite: extractWebsiteFromKrs(krsResult.report) ?? extractWebsiteFromGoWork(goWork),
+      officialWebsite,
       krs: firstRegistryRow.krs || undefined,
     });
     const digitalPresenceResult = await askPerplexityTableWithDebug(digitalPresencePrompt);
     const digitalPresenceMarkdown = digitalPresenceResult.content;
     const perplexityDigitalRows = parseDigitalPresenceRows(digitalPresenceMarkdown);
-    const resolvedWebsite =
-      extractWebsiteFromKrs(krsResult.report) ??
-      extractWebsiteFromGoWork(goWork) ??
-      extractWebsiteFromDigitalRows(perplexityDigitalRows);
+    const resolvedWebsite = officialWebsite;
     const websiteFactsResult = await extractWebsiteFactsWithDebug(resolvedWebsite);
     const websitePresenceResult = await fetchWebsiteDigitalPresence(resolvedWebsite);
     const digitalPresenceRows = mergeDigitalPresenceRows(
@@ -110,6 +110,8 @@ export async function POST(req: NextRequest) {
         placesRawResponse: googlePlaceResult.response,
         officialWebsite: resolvedWebsite,
         resolvedWebsite,
+        goWorkWebsite,
+        krsWebsite,
         steps: [
           {
             name: "Firecrawl Search + Firecrawl + Gemini: GoWork",
@@ -122,7 +124,7 @@ export async function POST(req: NextRequest) {
             response: krsResult.response,
           },
           {
-            name: "Perplexity: strona i social media",
+            name: "Perplexity: social media",
             request: digitalPresenceResult.request,
             response: digitalPresenceResult.response,
           },
@@ -334,16 +336,29 @@ function findNumericGoWorkValue(
 }
 
 function extractWebsiteFromGoWork(goWork: GoWorkReport): string | null {
-  for (const row of goWork.pages.flatMap((page) => page.rows)) {
-    const searchable = `${row.label} ${row.value} ${row.sourceQuote}`.toLowerCase();
-    if (!searchable.includes("www") && !searchable.includes("strona") && !searchable.includes("http")) {
-      continue;
+  const pages = [...goWork.pages].sort((a, b) => {
+    const aContact = isGoWorkContactPage(a) ? 0 : 1;
+    const bContact = isGoWorkContactPage(b) ? 0 : 1;
+    return aContact - bContact;
+  });
+
+  for (const page of pages) {
+    for (const row of page.rows) {
+      const searchable = `${row.label} ${row.value} ${row.sourceQuote}`.toLowerCase();
+      if (!searchable.includes("www") && !searchable.includes("strona") && !searchable.includes("http")) {
+        continue;
+      }
+      const website = extractWebsiteFromText(`${row.value} ${row.sourceQuote}`, "");
+      if (website) return website;
     }
-    const website = extractWebsiteFromText(`${row.value} ${row.sourceQuote}`, "");
-    if (website) return website;
   }
 
   return null;
+}
+
+function isGoWorkContactPage(page: GoWorkReport["pages"][number]): boolean {
+  const searchable = `${page.title} ${page.url}`.toLowerCase();
+  return searchable.includes("dane kontaktowe") || searchable.includes("dane-kontaktowe-firmy");
 }
 
 function extractWebsiteFromKrs(krs: KrsReport): string | null {

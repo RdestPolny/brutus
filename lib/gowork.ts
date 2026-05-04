@@ -11,6 +11,19 @@ import type { CompanyRegistryRow, GoWorkFinancialRow, GoWorkReport, GoWorkReview
 const MAX_GOWORK_PAGES = 5;
 const GOWORK_HOST = "gowork.pl";
 const GOWORK_PAGE_SUFFIXES = ["dane-kontaktowe-firmy", "praca-i-zarobki"];
+const GOWORK_WEBSITE_EXCLUDED_HOSTS = [
+  "gowork.pl",
+  "google.com",
+  "about:invalid",
+  "facebook.com",
+  "instagram.com",
+  "linkedin.com",
+  "youtube.com",
+  "youtu.be",
+  "tiktok.com",
+  "x.com",
+  "twitter.com",
+];
 const GOWORK_SCRAPE_OPTIONS = {
   formats: ["markdown", "links"] as const,
   onlyMainContent: true,
@@ -293,7 +306,10 @@ function discoverGoWorkPageUrls(
     }
   }
 
-  return Array.from(urls).filter((url) => !isDuplicatedGoWorkSuffixUrl(url)).slice(0, MAX_GOWORK_PAGES);
+  return orderGoWorkPageUrls(Array.from(urls).filter((url) => !isDuplicatedGoWorkSuffixUrl(url))).slice(
+    0,
+    MAX_GOWORK_PAGES
+  );
 }
 
 function extractMarkdownUrls(markdown: string): string[] {
@@ -322,6 +338,19 @@ function isUsefulGoWorkProfilePage(url: string): boolean {
     pathname.includes("zarobki") ||
     /,\d+/.test(pathname)
   );
+}
+
+function orderGoWorkPageUrls(urls: string[]): string[] {
+  const rank = (url: string): number => {
+    const pathname = new URL(url).pathname;
+    if (pathname.includes("dane-kontaktowe-firmy")) return 0;
+    if (/,\d+/.test(pathname) && !pathname.includes("opinie_czytaj")) return 1;
+    if (pathname.includes("opinie_czytaj")) return 2;
+    if (pathname.includes("praca-i-zarobki")) return 3;
+    return 4;
+  };
+
+  return urls.sort((a, b) => rank(a) - rank(b));
 }
 
 function isDuplicatedGoWorkSuffixUrl(value: string): boolean {
@@ -514,7 +543,11 @@ function extractDeterministicGoWorkData(text: string): { rows: GoWorkRow[]; fina
   addRow("contact", "KRS", extractLabeledValue(text, "KRS"), "KRS");
   addRow("contact", "REGON", extractLabeledValue(text, "REGON"), "REGON");
   addRow("contact", "E-mail", text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? "");
-  addRow("contact", "Strona www", extractFirstHttpUrl(text, ["gowork.pl", "google.com", "about:invalid"]));
+  addRow(
+    "contact",
+    "Strona www",
+    extractLabeledWebsite(text) || extractFirstHttpUrl(text, GOWORK_WEBSITE_EXCLUDED_HOSTS)
+  );
   addRow("profile", "Nazwa pełna", extractMarkdownHeadingValue(text, "Nazwa pełna"));
   addRow("profile", "Adres rejestrowy", extractMarkdownHeadingValue(text, "Adres rejestrowy"));
   addRow("profile", "Kapitał zakładowy", extractMarkdownHeadingValue(text, "Kapitał zakładowy"));
@@ -538,6 +571,44 @@ function extractLabeledValue(text: string, label: string): string {
     text.match(new RegExp(`\\*\\*${label}:\\*\\*\\s*([0-9]+)`, "i"))?.[1] ??
     extractMarkdownHeadingValue(text, label)
   );
+}
+
+function extractLabeledWebsite(text: string): string {
+  const lines = text.split("\n");
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!/(strona\s*(www|internetowa)|\bwww\b)/i.test(line)) continue;
+
+    const value = [line, lines[index + 1] ?? ""].join(" ");
+    const website = extractWebsiteCandidate(value);
+    if (website) return website;
+  }
+
+  return "";
+}
+
+function extractWebsiteCandidate(text: string): string {
+  const urlRegex = /\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s|,;)]*)?/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = urlRegex.exec(text))) {
+    try {
+      const rawValue = match[0].replace(/[.)\]]+$/g, "");
+      const url = new URL(/^https?:\/\//i.test(rawValue) ? rawValue : `https://${rawValue}`);
+      const host = url.hostname.replace(/^www\./, "").toLowerCase();
+      if (GOWORK_WEBSITE_EXCLUDED_HOSTS.some((excluded) => host === excluded || host.endsWith(`.${excluded}`))) {
+        continue;
+      }
+      url.hash = "";
+      url.search = "";
+      return url.toString().replace(/\/$/, "");
+    } catch {
+      // Ignore malformed URL-like values.
+    }
+  }
+
+  return "";
 }
 
 function extractMarkdownHeadingValue(text: string, label: string): string {
