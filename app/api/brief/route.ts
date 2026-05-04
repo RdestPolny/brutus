@@ -461,11 +461,20 @@ function normalizeWebsiteCandidate(rawValue: string): string | null {
     const url = new URL(withProtocol);
     const host = url.hostname.replace(/^www\./, "");
     if (!host.includes(".")) return null;
+    if (!isValidWebsiteHost(host)) return null;
     if (isDirectoryOrSocialDomain(host)) return null;
     return `${url.protocol}//${host}${url.pathname === "/" ? "" : url.pathname}`;
   } catch {
     return null;
   }
+}
+
+function isValidWebsiteHost(host: string): boolean {
+  const labels = host.toLowerCase().split(".");
+  const tld = labels[labels.length - 1] ?? "";
+  if (labels.length < 2 || !/^[a-z]{2,24}$/.test(tld)) return false;
+
+  return labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
 }
 
 function isDirectoryOrSocialDomain(host: string): boolean {

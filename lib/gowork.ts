@@ -597,6 +597,7 @@ function extractWebsiteCandidate(text: string): string {
       const rawValue = match[0].replace(/[.)\]]+$/g, "");
       const url = new URL(/^https?:\/\//i.test(rawValue) ? rawValue : `https://${rawValue}`);
       const host = url.hostname.replace(/^www\./, "").toLowerCase();
+      if (!isValidWebsiteHost(host)) continue;
       if (GOWORK_WEBSITE_EXCLUDED_HOSTS.some((excluded) => host === excluded || host.endsWith(`.${excluded}`))) {
         continue;
       }
@@ -661,6 +662,7 @@ function extractFirstHttpUrl(text: string, excludedHosts: string[]): string {
     try {
       const url = new URL(match[0]);
       const host = url.hostname.replace(/^www\./, "").toLowerCase();
+      if (!isValidWebsiteHost(host)) continue;
       if (excludedHosts.some((excluded) => host === excluded || host.endsWith(`.${excluded}`))) continue;
       url.hash = "";
       url.search = "";
@@ -670,6 +672,14 @@ function extractFirstHttpUrl(text: string, excludedHosts: string[]): string {
     }
   }
   return "";
+}
+
+function isValidWebsiteHost(host: string): boolean {
+  const labels = host.toLowerCase().split(".");
+  const tld = labels[labels.length - 1] ?? "";
+  if (labels.length < 2 || !/^[a-z]{2,24}$/.test(tld)) return false;
+
+  return labels.every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
 }
 
 function cleanupExtractedValue(value: string): string {
